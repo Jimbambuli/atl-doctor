@@ -10,7 +10,10 @@
 //               A record belongs to the last mark at or before it (before the first: phase 0).
 //               Phases 0..255; later marks count to phase 255.
 //   OUTPREFIX   outputs OUTPREFIX.methods (id\tclass\tname\tsig), .counts (phase\tid\tn),
-//               .callers (phase\tstub_id\tcaller_id\tkind\tn), .threads (tid\tname); ends when OUTPREFIX.stop exists
+//               .callers (phase\tstub_id\tcaller_id\tkind\tn), .threads (tid\tname),
+//               .time (phase\ttid\tid\tus: wall time the method was on top of the thread's stack = self time;
+//               with a sampling trace (VMDebug sampling) the stack changes only at samples, so the time between
+//               two of a thread's events belongs to the top method before them); ends when OUTPREFIX.stop exists
 //   WATCH       watched methods, lines "class\tname\tsig" (empty sig = every overload). For each entry into a
 //               watched method the nearest caller frame is counted: kind a = class in APP_PREFIX, o = other
 //               non-platform class (androidx, kotlin, obfuscated), - = none on the stack.
@@ -49,6 +52,9 @@ static char **watch;
 static uint32_t nwatch;
 static uint32_t *stk[65536];
 static uint16_t sdep[65536];
+static uint64_t tlast[65536];   // wall time (us since trace start) of the thread's last event, 0 = none yet
+typedef struct { uint64_t k, us; } tent_t;
+static struct { tent_t *t; uint32_t cap, used; } selft[MAXPH];
 
 static void *need(void *p) {
 	if (!p) { fputs("atl-doctor-tracecount: out of memory\n", stderr); exit(2); }
@@ -154,6 +160,33 @@ static void load_marks(void) {
 	fclose(f);
 }
 
+static void time_add(uint8_t ph, uint64_t k, uint64_t us) {
+	if (!selft[ph].t) { selft[ph].cap = 1u << 12; selft[ph].t = need(calloc(selft[ph].cap, sizeof(tent_t))); }
+	if (selft[ph].used * 2 >= selft[ph].cap) {
+		uint32_t oc = selft[ph].cap; tent_t *o = selft[ph].t;
+		selft[ph].cap = oc * 2; selft[ph].t = need(calloc(selft[ph].cap, sizeof(tent_t)));
+		for (uint32_t i = 0; i < oc; i++) if (o[i].us) {
+			uint32_t h = slot(o[i].k, selft[ph].cap);
+			while (selft[ph].t[h].us) h = (h + 1) & (selft[ph].cap - 1);
+			selft[ph].t[h] = o[i];
+		}
+		free(o);
+	}
+	uint32_t h = slot(k, selft[ph].cap);
+	while (selft[ph].t[h].us && selft[ph].t[h].k != k) h = (h + 1) & (selft[ph].cap - 1);
+	if (!selft[ph].t[h].us) { selft[ph].t[h].k = k; selft[ph].used++; }
+	selft[ph].t[h].us += us;
+}
+
+static uint8_t phase_at(uint64_t t);
+/* self time: the method on top of tid's stack since its last event gets the time up to t (absolute us) */
+static void account(uint16_t tid, uint64_t t, uint64_t start) {
+	uint16_t d = sdep[tid];
+	if (tlast[tid] && t > tlast[tid] && d > 0 && d <= STACK)
+		time_add(phase_at(start + tlast[tid]), ((uint64_t)tid << 24) | stk[tid][d - 1], t - tlast[tid]);
+	tlast[tid] = t;
+}
+
 static uint8_t phase_at(uint64_t t) {
 	uint8_t ph = nmarks ? mark_p[0] : 0;
 	for (uint32_t i = 0; i < nmarks; i++) { if (mark_t[i] <= t) ph = mark_p[i]; else break; }
@@ -204,6 +237,12 @@ static void write_results(const char *out) {
 		else fprintf(fj, "%u\t0x%x\t0x%x\t%s\t%u\n", p, id << 2, fr << 2, kind == F_APP ? "a" : "o", callers[p].t[i].n);
 	}
 	fclose(fj);
+	FILE *fs = open_out(out, "time");
+	for (uint32_t p = 0; p < MAXPH; p++) for (uint32_t i = 0; i < selft[p].cap; i++) if (selft[p].t[i].us) {
+		uint64_t k = selft[p].t[i].k;
+		fprintf(fs, "%u\t%u\t0x%x\t%" PRIu64 "\n", p, (uint32_t)(k >> 24), ((uint32_t)k & 0xFFFFFFu) << 2, selft[p].t[i].us);
+	}
+	fclose(fs);
 }
 
 int main(int argc, char **argv) {
@@ -281,6 +320,7 @@ int main(int argc, char **argv) {
 			uint32_t id = mv >> 2;
 			if (id >= MAXM) continue;
 			if (!stk[tid]) stk[tid] = need(calloc(STACK, sizeof(uint32_t)));
+			account(tid, wrap + wall, start_us);
 			if ((mv & 3) == 0) enter(tid, id, phase_at(start_us + wrap + wall));
 			else leave(tid, id);
 		}

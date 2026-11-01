@@ -4,6 +4,9 @@
  * It only observes, it changes nothing.
  *
  * Loading:  -agentpath:libatl_doctor_agent.so=OUT[,opt...]
+ *   or attached once the runtime runs (ATL --attach-agent=libatl_doctor_agent.so=OUT[,opt...], like Android's
+ *   "am start --attach-agent"): ART loads its JVMTI plugin then and the runtime stays non-debuggable and fast;
+ *   exceptions are recorded from the first app code on.
  *   ATL needs ART's JVMTI plugin: either -Xplugin:libopenjdkjvmti.so at start (runtime becomes debuggable and slow)
  *   or late=PLUGIN (see below).
  *   opt: noex          no exceptions
@@ -18,6 +21,10 @@
  *                      without GTK, e.g. on Android, one I line "frames unavailable")
  *        heap          with marks=: at every mark force a GC and count instances and bytes per class (C lines,
  *                      50 largest classes) and the JNI global references (M lines); slow
+ *        sample=US     ART's sampling profiler (VMDebug.startMethodTracing, sampling every US microseconds, streamed) into
+ *                      the file of sampletrace=FILE, started with the JVMTI environment: a time line of all threads
+ *                      for little cost, unlike -Xmethod-trace (every call)
+ *        sampletrace=FILE  see sample=
  *        hang=MS       main-thread hangs: a watchdog samples the main thread's Java stack every 20 ms; a blockade
  *                      is an unbroken run of samples deeper than the idle depth (smallest depth seen) longer than MS
  *
@@ -59,6 +66,8 @@ static char opt_arm[512], opt_late[512], opt_marks[512];
 static uint32_t opt_latesec = 20;
 static uint8_t opt_frames, opt_heap;
 static uint32_t opt_hang_ms;
+static uint32_t opt_sample_us;
+static char opt_sampletrace[512];
 static __thread uint8_t in_callback;   /* recursion guard per thread */
 
 static int64_t now_us(void) {
@@ -328,6 +337,18 @@ static void JNICALL wait_for_arm(jvmtiEnv *je, JNIEnv *jni, void *arg) {
 	while (access(opt_arm, F_OK) != 0) { struct timespec ts = { 0, 500000000L }; nanosleep(&ts, NULL); }
 	lc_active = 1; arm(jni);
 }
+/* sample=US: ART's sampling profiler, streamed into sampletrace=FILE (ART dups the descriptor) */
+static void start_sampling(JNIEnv *jni) {
+	int32_t fd = open(opt_sampletrace, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+	if (fd < 0) { info("sample: cannot open %s", opt_sampletrace); return; }
+	jclass k = (*jni)->FindClass(jni, "dalvik/system/VMDebug");
+	jmethodID m = k ? (*jni)->GetStaticMethodID(jni, k, "startMethodTracingFd", "(Ljava/lang/String;IIIZIZ)V") : NULL;
+	if (m) (*jni)->CallStaticVoidMethod(jni, k, m, (*jni)->NewStringUTF(jni, opt_sampletrace), (jint)fd,
+	                                    (jint)(8 << 20), (jint)0, JNI_TRUE, (jint)opt_sample_us, JNI_TRUE);
+	if (!m || (*jni)->ExceptionCheck(jni)) { (*jni)->ExceptionClear(jni); info("sample: VMDebug refused %s", opt_sampletrace); }
+	else { char z[32]; snprintf(z, sizeof z, "%u us", opt_sample_us); info("sample: every %s", z); }
+	close(fd);
+}
 static void JNICALL cb_vm_init(jvmtiEnv *je, JNIEnv *jni, jthread th) {
 	(void)je; (void)th;
 	jclass t = (*jni)->FindClass(jni, "java/lang/Throwable");
@@ -338,6 +359,7 @@ static void JNICALL cb_vm_init(jvmtiEnv *je, JNIEnv *jni, jthread th) {
 	else if (opt_lc) start_agent_thread(jni, "atl-doctor-arm", wait_for_arm);
 	if (opt_ex) (*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_EXCEPTION, NULL);
 	if (opt_hang_ms) start_agent_thread(jni, "atl-doctor-hang", hang_watchdog);
+	if (opt_sample_us && opt_sampletrace[0]) start_sampling(jni);
 	if (opt_marks[0]) start_agent_thread(jni, "atl-doctor-marks", marks_watcher);
 	if ((*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_START, NULL) == JVMTI_ERROR_NONE)
 		(*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_FINISH, NULL);
@@ -614,6 +636,8 @@ static jint start(JavaVM *vm, char *options) {
 		else if (!strcmp(o, "frames")) opt_frames = 1;
 		else if (!strcmp(o, "heap")) opt_heap = 1;
 		else if (!strncmp(o, "hang=", 5)) opt_hang_ms = (uint32_t)strtoul(o + 5, NULL, 10);
+		else if (!strncmp(o, "sample=", 7)) opt_sample_us = (uint32_t)strtoul(o + 7, NULL, 10);
+		else if (!strncmp(o, "sampletrace=", 12)) snprintf(opt_sampletrace, sizeof opt_sampletrace, "%s", o + 12);
 		else snprintf(unknown, sizeof unknown, "%s", o);
 		o = nx;
 	}

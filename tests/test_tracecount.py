@@ -140,3 +140,15 @@ def test_tracecount_header_longer_than_the_file(built, tmp_path):
     trace.write_bytes(bytes(h))
     r = run_counter(built, trace, marks(tmp_path / "m.tsv", START), tmp_path / "tr", watch(tmp_path / "w.txt"))
     assert r.returncode == 0, r.stderr
+
+
+def test_tracecount_self_time_per_phase_and_thread(built, tmp_path):
+    # thread 1: APP from 100, STUB on top 300-700, APP until 1500 (the last interval starts in phase 0);
+    # thread 2: LIB from 1200 to 1600 (phase 1). Like samples: the top method keeps the time up to the next event.
+    recs = [(1, APP[0], ENTER, 100), (1, STUB[0], ENTER, 300), (1, STUB[0], EXIT, 700), (2, LIB[0], ENTER, 1200),
+            (1, APP[0], EXIT, 1500), (2, LIB[0], EXIT, 1600)]
+    make_trace(tmp_path / "t.bin", 3, START, METHODS, recs)
+    out = tmp_path / "tr"
+    r = run_counter(built, tmp_path / "t.bin", marks(tmp_path / "m", START, START + 1000), out, watch(tmp_path / "w"))
+    assert r.returncode == 0, r.stderr
+    assert table(f"{out}.time") == {f"0\t1\t0x{2 << 2:x}\t1000", f"0\t1\t0x{1 << 2:x}\t400", f"1\t2\t0x{3 << 2:x}\t400"}

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from .env import resolve
+from .env import Probe, resolve
 from .errors import DoctorError, UsageError
 from .findings import FIX_FIRST_MAX, Finding, Klass, rank
 
@@ -17,7 +17,7 @@ from .findings import FIX_FIRST_MAX, Finding, Klass, rank
 class Report:
     mode: str  # "record" | "log" | "scan"
     environment: dict[str, str]
-    probes: list[Any]  # list[Probe] from Task 7
+    probes: list[Probe]
     phases: list[str]
     findings: list[Finding]
     extras: dict[str, Any] = field(default_factory=dict)

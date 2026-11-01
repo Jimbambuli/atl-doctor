@@ -238,3 +238,19 @@ def test_android_mark_screenshot(adb, apk, tmp_path, capsys):
     (adb / "device" / "screencap.png").unlink()
     assert _run_with_mark(adb, apk, tmp_path / "d") == 0
     assert "no screenshot for mark 1 (Main): screencap failed" in capsys.readouterr().err
+
+
+def test_android_scroll_notches_and_smooth(adb, apk, tmp_path):
+    table(adb, root=False)
+    t = json.loads((adb / "table.json").read_text())
+    t["shell dumpsys window"] = ["  mCurrentFocus=Window{1 u0 org.example.demo/org.example.demo.Main}\n", 0]
+    t["shell dumpsys gfxinfo org.example.demo"] = ["Total frames rendered: 12\n", 0]
+    (adb / "table.json").write_text(json.dumps(t))
+    (adb / "device" / "pidof").write_text("1234\n")
+    steps = tmp_path / "s.steps"
+    steps.write_text('wait-window org.example.demo 5\nscroll 2\nscroll-smooth -128\n')
+    assert main(["record", "--android", "--steps", str(steps), "-o", str(tmp_path / "c"), str(apk)]) == 0
+    sw = [c.split() for c in calls(adb) if c.startswith("shell input swipe")]
+    assert len(sw) == 3                        # one gesture per notch, one for the smooth scroll
+    dist = [int(s[4]) - int(s[6]) for s in sw]  # y1 - y2
+    assert dist[0] == dist[1] > 0 and dist[2] == -2 * dist[0]   # 64 dp per notch, -128 dp smooth

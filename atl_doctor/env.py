@@ -17,6 +17,7 @@ from .errors import PrerequisiteMissing
 AGENT_LIB = "libatl_doctor_agent.so"
 TRACECOUNT = "atl-doctor-tracecount"
 INPUT_HELPER = "atl-doctor-input"
+WHEEL_SHIM = "libatl_doctor_wheel.so"
 
 
 @dataclass

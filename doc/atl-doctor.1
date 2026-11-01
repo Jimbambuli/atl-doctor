@@ -196,11 +196,18 @@ One command per line or separated by semicolons; \fB#\fR starts a comment outsid
 .nf
 wait\-window "Title" [TIMEOUT]
 click "Text" | click id/NAME | click X,Y     (dp, relative to android:id/content)
-key NAME[+NAME]       type "text"       scroll N
+key NAME[+NAME]       type "text"       scroll N       scroll\-smooth DY
 wait SECONDS          wait\-idle [TIMEOUT]
 mark ["name"]         screenshot "name"
 repeat N { ... }      (also over several lines, nested)
 .fi
+.PP
+\fBscroll\fR N sends N single mouse\-wheel notches (N > 0 down, N < 0 up), the way a real wheel does
+(wl_pointer axis source wheel with value120). Under ATL this needs the preload library
+\fIlibatl_doctor_wheel.so\fR, which \fBrecord\fR puts into the app by itself when it runs headless; without it
+GTK sees the notches as smooth scrolling. \fBscroll\-smooth\fR DY scrolls touchpad\-like by DY units
+(surface pixels under ATL, dp on Android) and is what \fBscroll\fR sent before. On Android every notch is one
+swipe of 64 dp (adb cannot send a wheel source).
 .PP
 The same file runs under ATL and on Android, so the two recordings can be compared step by step.
 Error messages carry file name and line number.

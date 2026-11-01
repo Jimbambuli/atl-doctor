@@ -17,6 +17,24 @@ def test_input_helper_builds(built):
     assert (built / "atl-doctor-input").exists()
 
 
+def test_wheel_shim_builds_and_loads(built):
+    import subprocess
+    if subprocess.run(["pkg-config", "--exists", "wayland-client", "xkbcommon"]).returncode != 0:
+        pytest.skip("wayland-client/xkbcommon missing")
+    lib = built / "libatl_doctor_wheel.so"
+    assert lib.exists()
+    r = subprocess.run(["env", f"LD_PRELOAD={lib}", "true"], capture_output=True, text=True)
+    assert r.returncode == 0 and r.stderr == ""
+
+
+def test_input_helper_protocol_has_wheel_and_smooth(built):
+    import subprocess
+    if subprocess.run(["pkg-config", "--exists", "wayland-client", "xkbcommon"]).returncode != 0:
+        pytest.skip("wayland-client/xkbcommon missing")
+    strings = subprocess.run(["strings", str(built / "atl-doctor-input")], capture_output=True, text=True).stdout
+    assert "wheel %" in strings and "wheel-smooth %" in strings
+
+
 def test_agent_builds_with_frames_and_hang(built, tmp_path):
     """Built with -Dwerror; on a host JVM (no GTK) frames are reported unavailable, hangs and GCs are seen."""
     import subprocess

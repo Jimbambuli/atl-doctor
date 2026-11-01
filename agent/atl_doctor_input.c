@@ -8,7 +8,11 @@
  *   long X Y MS                  press, hold MS, release
  *   drag X1 Y1 X2 Y2 [HOLD_MS]   press, hold (default 300 ms), move in ten steps, release
  *   move X Y                     pointer motion
- *   wheel X Y N [MS]             N wheel notches (N > 0 down), MS between notches (default 50)
+ *   wheel X Y N [MS]             N real wheel notches (N > 0 down), MS between notches (default 50); the axis
+ *                                value is marked, libatl_doctor_wheel.so in the app turns it into source wheel +
+ *                                value120 (without the shim GTK sees smooth scrolling)
+ *   wheel-smooth X Y DY [MS]     touchpad-like smooth scrolling: axis events of at most 15 units until DY units
+ *                                (DY > 0 down) are sent, MS between them (default 50)
  *   key NAME[+NAME...]           xkb keysym names and ctrl/shift/alt/super; pressed in order,
  *                                released in reverse ("key ctrl+a")
  *   text STRING                  UTF-8, typed as evdev keycodes from the compositor's keymap
@@ -313,13 +317,29 @@ static void handle(char *line)
 		org_kde_kwin_fake_input_button(fi, BTN_LEFT, 1);
 		flush_ms(80);
 		org_kde_kwin_fake_input_button(fi, BTN_LEFT, 0);
+	} else if ((n = sscanf(line, "wheel-smooth %" SCNd32 " %" SCNd32 " %" SCNd32 " %" SCNd32, &a, &b, &c, &d)) >= 3) {
+		int32_t left = abs(c);
+
+		if (n == 3)
+			d = 50;
+		move(a, b);
+		while (left > 0) {
+			int32_t step = left < 15 ? left : 15;
+
+			/* axis 0 = vertical; an unmarked value passes the shim unchanged */
+			org_kde_kwin_fake_input_axis(fi, 0, c > 0 ? wl_fixed_from_int(step) : -wl_fixed_from_int(step));
+			left -= step;
+			flush_ms((uint32_t)d);
+		}
 	} else if ((n = sscanf(line, "wheel %" SCNd32 " %" SCNd32 " %" SCNd32 " %" SCNd32, &a, &b, &c, &d)) >= 3) {
 		if (n == 3)
 			d = 50;
 		move(a, b);
 		for (n = 0; n < abs(c); n++) {
-			/* axis 0 = vertical; 15 = one wheel notch as libinput reports it */
-			org_kde_kwin_fake_input_axis(fi, 0, c > 0 ? wl_fixed_from_int(15) : -wl_fixed_from_int(15));
+			/* axis 0 = vertical; 15 + 1/256 marks one real notch for libatl_doctor_wheel.so */
+			wl_fixed_t v = wl_fixed_from_int(15) + 1;
+
+			org_kde_kwin_fake_input_axis(fi, 0, c > 0 ? v : -v);
 			flush_ms((uint32_t)d);
 		}
 	} else if (sscanf(line, "move %" SCNd32 " %" SCNd32, &a, &b) == 2) {

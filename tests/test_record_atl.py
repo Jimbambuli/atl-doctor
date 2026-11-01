@@ -368,3 +368,17 @@ def test_spectacle_probe_needs_headless(tmp_prefix, apk, tmp_path):
     assert main(["record", "-o", str(tmp_path / "c"), "--prefix", str(tmp_prefix), str(apk)]) == 0
     p = next(p for p in Capture.open(tmp_path / "c").read_manifest().probes if p["name"] == "spectacle")
     assert not p["available"] and p["reason"] == "screenshots need --headless"
+
+
+def test_build_command_preloads_wheel_shim(tmp_path, monkeypatch):
+    monkeypatch.delenv("LD_PRELOAD", raising=False)
+    cap = Capture.create(tmp_path / "c", "atl")
+    opts = RecordOptions(apk=Path("/x/app.apk"), out=None, prefix=Path("/p"), atl_src=None, agent=None, atl_args=[])
+    _, env = build_command(opts, cap, None, None, trace=False, wheel=Path("/h/libatl_doctor_wheel.so"))
+    assert env["LD_PRELOAD"] == "/h/libatl_doctor_wheel.so"
+    assert env["ATL_DOCTOR_WHEEL_LOG"] == f"{cap.root}/run/wheel.log"
+    monkeypatch.setenv("LD_PRELOAD", "/x/other.so")
+    _, env = build_command(opts, cap, None, None, trace=False, wheel=Path("/h/libatl_doctor_wheel.so"))
+    assert env["LD_PRELOAD"] == "/h/libatl_doctor_wheel.so:/x/other.so"
+    _, env = build_command(opts, cap, None, None, trace=False)
+    assert "LD_PRELOAD" not in env

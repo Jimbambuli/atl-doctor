@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Callable
 
 from .capture import AGENT, ATL_LOG, CONTROL, MARKS, SHOTS, STEPS_DATA, STEPS_LOG, TRACE_DIR, TREES, Capture, Mark
-from .env import AGENT_LIB, INPUT_HELPER, TRACECOUNT, Probe, find_helper, has_viewdump, jvmti_plugin, probe_all, resolve
+from .env import AGENT_LIB, INPUT_HELPER, TRACECOUNT, WHEEL_SHIM, Probe, find_helper, has_viewdump, jvmti_plugin, probe_all, resolve
 from .errors import DoctorError, PrerequisiteMissing
 from .headless import APP_HEIGHT, APP_WIDTH, HeadlessSession
 from .sources.trace import write_watch_file
@@ -55,7 +55,7 @@ def default_out_dir(now: datetime) -> Path:
 
 
 def build_command(opts: RecordOptions, cap: Capture, plugin: Path | None, agent: Path | None,
-                  trace: bool = True) -> tuple[list[str], dict[str, str]]:
+                  trace: bool = True, wheel: Path | None = None) -> tuple[list[str], dict[str, str]]:
     """ATL command line and the environment variables to add."""
     c = cap.root
     cmd = [str(opts.prefix / "bin/android-translation-layer"), str(opts.apk), *opts.atl_args]
@@ -68,6 +68,9 @@ def build_command(opts: RecordOptions, cap: Capture, plugin: Path | None, agent:
     env = {"LD_LIBRARY_PATH": f"{opts.prefix}/lib64:{opts.prefix}/lib64/art"}
     if has_viewdump(opts.prefix):
         env["ATL_VIEWDUMP"] = f"{c}/{TREES}"
+    if wheel:  # turns the helper's marked wheel steps into real notches (source wheel); log lets one count them
+        env["LD_PRELOAD"] = ":".join([str(wheel), *filter(None, [os.environ.get("LD_PRELOAD")])])
+        env["ATL_DOCTOR_WHEEL_LOG"] = f"{c}/{RUN_DIR}/wheel.log"
     return cmd, env
 
 
@@ -279,7 +282,8 @@ def record_atl(opts: RecordOptions) -> int:
     if opts.headless and not any(a in ("-w", "--width") for a in opts.atl_args):
         opts.atl_args = ["-w", str(APP_WIDTH), "-h", str(APP_HEIGHT), *opts.atl_args]
     # without the counter nobody would consume the streamed trace: no trace then (it would grow without bound)
-    cmd, extra_env = build_command(opts, cap, plugin, agent, trace=counter is not None)
+    wheel = find_helper(WHEEL_SHIM, None, opts.prefix) if opts.headless else None
+    cmd, extra_env = build_command(opts, cap, plugin, agent, trace=counter is not None, wheel=wheel)
     trees = "ATL_VIEWDUMP" in extra_env
     if trees:
         cap.path(TREES).mkdir()

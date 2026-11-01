@@ -44,7 +44,7 @@ Exit status: 0 ok, 1 error, 2 usage error, 3 required prerequisite missing, 4 fi
 
 ## Scenarios
 
-A *scenario* is a step file (`record --steps FILE`) that drives an app: click, type, key, scroll, wait, mark,
+A *scenario* is a step file (`record --steps FILE`) that drives an app: click, type, key, `scroll N` (N real mouse-wheel notches), `scroll-smooth DY` (touchpad-like), wait, mark,
 screenshot, `repeat N { ... }`. The same file runs under ATL and on Android, and the report lists, for every
 step that ran, the frames drawn and the distance scrolled (from the view trees before and after the step),
 ATL next to Android.

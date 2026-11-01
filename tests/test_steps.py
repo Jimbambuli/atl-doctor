@@ -61,6 +61,8 @@ def test_escaped_quote():
     ('click "unterminated', 1, "unterminated string"),
     ("repeat 3 { key Escape", 1, "missing '}'"),
     ("scroll x", 1, "scroll expects an integer"),
+    ("scroll-smooth", 1, "scroll-smooth expects an integer"),
+    ("scroll-smooth 1.5", 1, "scroll-smooth expects an integer"),
     ("wait", 1, "wait expects a number of seconds"),
     ("click", 1, 'click expects "Text", id/NAME or X,Y'),
     ("key a b", 1, "key: too many arguments"),
@@ -84,6 +86,7 @@ class FakeDriver:
     def key(self, combo): self.calls.append(("key", combo))
     def type_text(self, s): self.calls.append(("type", s))
     def scroll(self, n): self.calls.append(("scroll", n))
+    def scroll_smooth(self, dy): self.calls.append(("scroll-smooth", dy))
     def screenshot(self, name): self.calls.append(("screenshot", name))
     def wait_idle(self, t): self.calls.append(("wait-idle", t)); return True
     def wait_window(self, m, t): self.calls.append(("wait-window", m, t)); return m != "never"
@@ -152,3 +155,24 @@ def test_example_step_files_parse():
     assert files
     for f in files:
         assert parse_steps(f.read_text(encoding="utf-8"), f.name)
+
+
+def test_scroll_smooth_parses_and_runs():
+    steps = parse_steps("scroll-smooth -120\nscroll 3", "s")
+    assert steps[0].cmd == "scroll-smooth" and steps[0].args == (-120,)
+    d = FakeDriver()
+    run_steps(steps, d, "s", io.StringIO())
+    assert d.calls == [("scroll-smooth", -120), ("scroll", 3)]
+
+
+def test_atl_driver_wheel_notches_vs_smooth(tmp_path, monkeypatch):
+    from atl_doctor.capture import Capture
+    from atl_doctor.steps import AtlDriver
+
+    cap = Capture.create(tmp_path / "c", "atl")
+    d = AtlDriver(cap, _Session(), tmp_path / "fifo", tmp_path / "status", has_tree=False, frames=False)
+    sent = []
+    monkeypatch.setattr(d, "_send", sent.append)
+    d.scroll(5)            # real wheel notches (the preload shim turns them into source wheel + value120)
+    d.scroll_smooth(-90)   # the former touchpad-like scrolling
+    assert sent == ["wheel 666 400 5", "wheel-smooth 666 400 -90"]

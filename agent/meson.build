@@ -35,6 +35,8 @@ else
     ]
     executable('atl-doctor-input', 'atl_doctor_input.c', fake_input, dependencies: [wl_client, xkb],
                install: true, install_dir: helper_dir)
+    shared_module('atl_doctor_wheel', 'atl_doctor_wheel.c', name_prefix: 'lib', dependencies: [wl_client, agent_deps],
+                  install: true, install_dir: helper_dir)
   else
     message('atl-doctor-input skipped: needs wayland-client, xkbcommon and wayland-scanner')
   endif

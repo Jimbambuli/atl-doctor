@@ -3,7 +3,7 @@
 
 One command per line or separated by ';', '#' starts a comment outside quotes:
     wait-window "Title" [TIMEOUT]   click "Text" | click id/NAME | click X,Y (dp)   key NAME[+NAME]
-    type "text"   scroll N   wait SECONDS   wait-idle [TIMEOUT]   mark ["name"]   screenshot "name"
+    type "text"   scroll N   scroll-smooth DY   wait SECONDS   wait-idle [TIMEOUT]   mark ["name"]   screenshot "name"
     repeat N { ... }   (also over several lines, nested)
 """
 from __future__ import annotations
@@ -147,10 +147,10 @@ def _command(name: _Tok, args: list[_Tok], filename: str) -> Step:
         if t is None:
             raise err("wait expects a number of seconds")
         return Step(line, cmd, (t,))
-    if cmd == "scroll":
+    if cmd in ("scroll", "scroll-smooth"):
         limit(1)
         if not args or not re.match(r"^-?\d+$", args[0].value) or args[0].kind != "word":
-            raise err("scroll expects an integer")
+            raise err(f"{cmd} expects an integer")
         return Step(line, cmd, (int(args[0].value),))
     if cmd in ("key", "type", "screenshot"):
         limit(1)
@@ -215,6 +215,7 @@ class Driver(Protocol):
     def key(self, combo: str) -> None: ...
     def type_text(self, s: str) -> None: ...
     def scroll(self, n: int) -> None: ...
+    def scroll_smooth(self, dy: int) -> None: ...
     def screenshot(self, name: str) -> None: ...
     def wait_idle(self, timeout_s: float) -> bool: ...
     def wait_window(self, match: str, timeout_s: float) -> bool: ...
@@ -225,7 +226,7 @@ def _describe(s: Step) -> str:
     return " ".join([s.cmd] + [repr(a) if isinstance(a, str) and " " in a else str(a) for a in s.args])
 
 
-PROBED_CMDS = ("scroll", "key")   # steps that can move content: view trees before and after
+PROBED_CMDS = ("scroll", "scroll-smooth", "key")   # steps that can move content: view trees before and after
 SETTLE_S = 2.0                    # a probed step is over when the drawing has settled (kinetic scrolling)
 
 
@@ -346,6 +347,8 @@ def _run_one(s: Step, d: Driver, filename: str) -> None:
         d.type_text(str(a[0]))
     elif s.cmd == "scroll":
         d.scroll(int(a[0]))
+    elif s.cmd == "scroll-smooth":
+        d.scroll_smooth(int(a[0]))
     elif s.cmd == "wait":
         time.sleep(float(a[0]))
     elif s.cmd == "wait-idle":
@@ -491,10 +494,18 @@ class AtlDriver:
     def type_text(self, s: str) -> None:
         self._send(f"text {s}")
 
-    def scroll(self, n: int) -> None:
+    def _window_centre(self) -> tuple[int, int]:
         w = self._main_window()
         x, y, ww, hh = w["rect"] if w else (0.0, 0.0, 0.0, 0.0)
-        self._send(f"wheel {round(x + ww / 2)} {round(y + hh / 2)} {n}")
+        return round(x + ww / 2), round(y + hh / 2)
+
+    def scroll(self, n: int) -> None:
+        """N real wheel notches (the helper marks them; the preload shim in the app makes them source wheel)."""
+        self._send("wheel %d %d %d" % (*self._window_centre(), n))
+
+    def scroll_smooth(self, dy: int) -> None:
+        """Touchpad-like smooth scrolling by DY surface units (what `scroll` sent before wheel notches existed)."""
+        self._send("wheel-smooth %d %d %d" % (*self._window_centre(), dy))
 
     def screenshot(self, name: str) -> None:
         from .capture import SHOTS
@@ -636,12 +647,21 @@ class AndroidDriver:
     def type_text(self, s: str) -> None:
         self._adb("shell", "input", "text", shlex.quote(s.replace(" ", "%s")))
 
-    def scroll(self, n: int) -> None:
+    def _swipe(self, dp: float) -> None:
+        """One vertical gesture of DP (positive = content moves up), at most 80 % of the screen height."""
         size = re.search(r"(\d+)x(\d+)", self._adb("shell", "wm", "size"))
         w, h = (int(size.group(1)), int(size.group(2))) if size else (1080, 1920)
-        dist = max(-h * 0.4, min(h * 0.4, n * SCROLL_STEP_DP * self.density))
+        dist = max(-h * 0.4, min(h * 0.4, dp * self.density))
         x, y = w // 2, h // 2
         self._adb("shell", "input", "swipe", str(x), str(round(y + dist / 2)), str(x), str(round(y - dist / 2)), "300")
+
+    def scroll(self, n: int) -> None:
+        """One gesture of SCROLL_STEP_DP per notch (adb has no wheel source; each notch stays a separate event)."""
+        for _ in range(abs(n)):
+            self._swipe(SCROLL_STEP_DP if n > 0 else -SCROLL_STEP_DP)
+
+    def scroll_smooth(self, dy: int) -> None:
+        self._swipe(float(dy))
 
     def screenshot(self, name: str) -> None:
         from .capture import SHOTS

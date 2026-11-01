@@ -1,0 +1,20 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+  <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" clickable="false" bounds="[0,0][1080,48]">
+    <node index="0" text="12:00" resource-id="com.android.systemui:id/clock" class="android.widget.TextView" package="com.android.systemui" content-desc="" clickable="false" bounds="[0,0][100,48]" />
+  </node>
+  <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="org.example.demo" content-desc="" clickable="false" bounds="[0,0][1080,1600]">
+    <node index="0" text="" resource-id="android:id/content" class="android.widget.FrameLayout" package="org.example.demo" content-desc="" clickable="false" bounds="[0,0][1080,1600]">
+      <node index="0" text="Playlist" resource-id="org.example.demo:id/title" class="android.widget.TextView" package="org.example.demo" content-desc="" clickable="false" bounds="[0,0][1080,96]" />
+      <node index="1" text="" resource-id="org.example.demo:id/name_field" class="android.widget.EditText" package="org.example.demo" content-desc="" clickable="true" bounds="[200,400][600,496]" />
+      <node index="2" text="Save" resource-id="org.example.demo:id/save" class="android.widget.Button" package="org.example.demo" content-desc="" clickable="true" bounds="[200,600][600,700]" />
+      <node index="3" text="Help" resource-id="org.example.demo:id/help" class="android.widget.TextView" package="org.example.demo" content-desc="" clickable="false" bounds="[0,1400][400,1480]" />
+      <node index="4" text="" resource-id="org.example.demo:id/web" class="android.webkit.WebView" package="org.example.demo" content-desc="" clickable="false" bounds="[0,800][1080,1200]">
+        <node index="0" text="Article heading" resource-id="" class="android.view.View" package="org.example.demo" content-desc="" clickable="false" bounds="[0,800][1080,880]" />
+        <node index="1" text="Article body" resource-id="" class="android.view.View" package="org.example.demo" content-desc="" clickable="false" bounds="[0,880][1080,1200]" />
+      </node>
+      <node index="5" text="Status" resource-id="org.example.demo:id/status" class="android.widget.TextView" package="org.example.demo" content-desc="" clickable="false" bounds="[600,1300][1000,1396]" />
+      <node index="6" text="" resource-id="" class="android.widget.ImageButton" package="org.example.demo" content-desc="Open menu" clickable="true" bounds="[960,1500][1080,1600]" />
+    </node>
+  </node>
+</hierarchy>

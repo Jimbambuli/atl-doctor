@@ -93,6 +93,23 @@ def test_mark_during_recording(tmp_prefix, apk, tmp_path):
     assert not t.is_alive() and res["rc"] == 0
 
 
+def test_mark_requests_view_tree(tmp_prefix, apk, tmp_path, monkeypatch):
+    import atl_doctor.record_atl as ra
+    monkeypatch.setattr(ra, "has_viewdump", lambda prefix: True)
+    c = tmp_path / "c"
+    t, res = _record_in_thread(["record", "-o", str(c), "--prefix", str(tmp_prefix), str(apk), "--", "--wait",
+                                "--viewdump"])
+    try:
+        assert wait_for(lambda: (c / "control").exists())
+        assert main(["mark", "-d", str(c), "Main view"]) == 0
+        assert wait_for(lambda: (c / "trees/01-Main-view.xml").is_file())
+    finally:
+        wait_for(lambda: "atl_pid" in Capture(c).read_manifest().environment)
+        os.kill(int(Capture(c).read_manifest().environment["atl_pid"]), signal.SIGTERM)
+        t.join(20)
+    assert not t.is_alive() and res["rc"] == 0
+
+
 def test_mark_without_recorder_times_out(tmp_path, capsys):
     Capture.create(tmp_path / "c", "atl")
     os.mkfifo(tmp_path / "c/control")

@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .capture import AGENT, ATL_LOG, CONTROL, MARKS, TRACE_DIR, TREES, Capture
+from .capture import AGENT, ATL_LOG, CONTROL, MARKS, TRACE_DIR, TREES, Capture, Mark
 from .env import AGENT_LIB, TRACECOUNT, Probe, find_helper, has_viewdump, jvmti_plugin, probe_all, resolve
 from .errors import DoctorError, PrerequisiteMissing
 from .sources.trace import write_watch_file
@@ -112,14 +112,33 @@ def _stop_group(proc: subprocess.Popen) -> None:
         proc.wait()
 
 
-def _handle_control(cap: Capture, data: bytes, buf: bytearray) -> None:
+def _handle_control(cap: Capture, data: bytes, buf: bytearray) -> list[Mark]:
+    """Process complete control lines; the marks they created."""
+    new = []
     buf += data
     while b"\n" in buf:
         line, _, rest = bytes(buf).partition(b"\n")
         buf[:] = rest
         text = line.decode("utf-8", "replace")
         if text == "mark" or text.startswith("mark "):
-            cap.append_mark(text[5:] or None)
+            new.append(cap.append_mark(text[5:] or None))
+    return new
+
+
+def tree_name(mark: Mark) -> str:
+    """trees/NN-name.xml: mark index and a file-name-safe form of its name."""
+    return f"{mark.index:02d}-" + (re.sub(r"[^A-Za-z0-9._-]+", "-", mark.name).strip("-") or "mark")
+
+
+def _request_tree(cap: Capture, mark: Mark) -> None:
+    """In the background: the control loop must not wait for the app."""
+    from .sources.tree import request_atl_tree
+
+    def run() -> None:
+        if request_atl_tree(cap.path(TREES), tree_name(mark)) is None:
+            _warn(f"no view tree for mark {mark.index} ({mark.name}): ATLViewDump did not answer")
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 def record_atl(opts: RecordOptions) -> int:
@@ -158,6 +177,9 @@ def record_atl(opts: RecordOptions) -> int:
 
     # without the counter nobody would consume the streamed trace: no trace then (it would grow without bound)
     cmd, extra_env = build_command(opts, cap, plugin, agent, trace=counter is not None)
+    trees = "ATL_VIEWDUMP" in extra_env
+    if trees:
+        cap.path(TREES).mkdir()
     m = cap.read_manifest()
     m.apk, m.package, m.version_name = str(opts.apk), info.package, info.version_name
     m.command = cmd
@@ -190,7 +212,9 @@ def record_atl(opts: RecordOptions) -> int:
                 continue
             if ready:
                 try:
-                    _handle_control(cap, os.read(ctl, 4096), buf)
+                    for mk in _handle_control(cap, os.read(ctl, 4096), buf):
+                        if trees:
+                            _request_tree(cap, mk)
                 except BlockingIOError:
                     pass
         if stop.by is not None:

@@ -1,0 +1,140 @@
+{
+  "environment": {
+    "apk": "demo.apk",
+    "ended": "2026-11-01T10:01:00+00:00",
+    "package": "org.example.demo",
+    "signal": "SIGSEGV",
+    "started": "2026-11-01T10:00:00+00:00",
+    "version_name": "1.0"
+  },
+  "extras": {},
+  "findings": [
+    {
+      "class": "crash",
+      "count": 2,
+      "details": {},
+      "id": "crash:signal:SIGSEGV",
+      "key": "signal:SIGSEGV",
+      "kind": "crash",
+      "occurrences": [
+        {
+          "count": 1,
+          "phase": "start",
+          "phase_index": 0,
+          "side": "atl",
+          "where": "line 5"
+        },
+        {
+          "count": 1,
+          "phase": "Import",
+          "phase_index": 1,
+          "side": "atl",
+          "where": "manifest"
+        }
+      ],
+      "on_android": false,
+      "short_id": "53ac4e33",
+      "suggestion": "Fix the crash first; later findings may be consequences.",
+      "title": "fatal signal SIGSEGV",
+      "weight": 60,
+      "weight_explained": {
+        "android_penalty": 0,
+        "class": "crash",
+        "rank": 60
+      }
+    },
+    {
+      "class": "crash",
+      "count": 1,
+      "details": {
+        "app_frame": "org.example.demo.ImportTask$$ExternalSyntheticN.run",
+        "catcher": "",
+        "message": "bad state 7",
+        "stack": [
+          "org.example.demo.ImportTask$$ExternalSyntheticN.run",
+          "android.os.Handler.dispatchMessage"
+        ]
+      },
+      "id": "crash:uncaught:java.lang.IllegalStateException@android.os.Handler.dispatchMessage",
+      "key": "uncaught:java.lang.IllegalStateException@android.os.Handler.dispatchMessage",
+      "kind": "crash",
+      "occurrences": [
+        {
+          "count": 1,
+          "phase": "Import",
+          "phase_index": 1,
+          "side": "atl",
+          "where": "org.example.demo.ImportTask$$ExternalSyntheticN.run"
+        }
+      ],
+      "on_android": false,
+      "short_id": "ee23dbfa",
+      "suggestion": "Fix the crash first; later findings may be consequences.",
+      "title": "uncaught java.lang.IllegalStateException: bad state N",
+      "weight": 60,
+      "weight_explained": {
+        "android_penalty": 0,
+        "class": "crash",
+        "rank": 60
+      }
+    },
+    {
+      "class": "other",
+      "count": 1,
+      "details": {
+        "app_frame": "org.example.demo.Main.onCreate",
+        "catcher": "org.example.demo.Main.onCreate",
+        "message": "Attempt to read field 0x1f on null",
+        "stack": [
+          "android.graphics.drawable.Drawable.inflate",
+          "org.example.demo.Main.onCreate",
+          "android.app.Activity.performCreate"
+        ]
+      },
+      "id": "exc:java.lang.NullPointerException@android.graphics.drawable.Drawable.inflate",
+      "key": "java.lang.NullPointerException@android.graphics.drawable.Drawable.inflate",
+      "kind": "exc",
+      "occurrences": [
+        {
+          "count": 1,
+          "phase": "start",
+          "phase_index": 0,
+          "side": "atl",
+          "where": "org.example.demo.Main.onCreate"
+        }
+      ],
+      "on_android": false,
+      "short_id": "286e960d",
+      "suggestion": "",
+      "title": "java.lang.NullPointerException: Attempt to read field X on null",
+      "weight": 0,
+      "weight_explained": {
+        "android_penalty": 0,
+        "class": "other",
+        "rank": 0
+      }
+    }
+  ],
+  "format": 1,
+  "mode": "record",
+  "phases": [
+    "start",
+    "Import"
+  ],
+  "probes": [],
+  "ranking": {
+    "ranks": {
+      "crash": 60,
+      "exception-atl-only": 50,
+      "jank": 10,
+      "memory-growth": 20,
+      "missing": 60,
+      "other": 0,
+      "stub-result-used": 40,
+      "tree-visible": 30
+    },
+    "rule": "class rank, minus 5 if also on Android; then count desc, earliest phase, id"
+  },
+  "tool": "atl-doctor",
+  "tool_version": "X"
+}

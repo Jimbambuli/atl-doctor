@@ -1,0 +1,25 @@
+Environment
+  mode: record
+  phases: start, Import
+  package: org.example.demo
+  version_name: 1.0
+  apk: demo.apk
+  started: 2026-11-01T10:00:00+00:00
+  ended: 2026-11-01T10:01:00+00:00
+  signal: SIGSEGV
+
+Fix first
+  53ac4e33   60  fatal signal SIGSEGV  [2x, first: start]
+      -> Fix the crash first; later findings may be consequences.
+  ee23dbfa   60  uncaught java.lang.IllegalStateException: bad state N  [1x, first: Import]
+      -> Fix the crash first; later findings may be consequences.
+
+Exceptions
+  only ATL
+    286e960d    0  java.lang.NullPointerException: Attempt to read field X on null  [1x, first: start]
+
+Crashes
+  53ac4e33   60  fatal signal SIGSEGV  [2x, first: start]
+      -> Fix the crash first; later findings may be consequences.
+  ee23dbfa   60  uncaught java.lang.IllegalStateException: bad state N  [1x, first: Import]
+      -> Fix the crash first; later findings may be consequences.

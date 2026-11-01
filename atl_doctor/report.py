@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import html
+import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from . import __version__
 from .env import Probe, resolve
-from .errors import DoctorError, UsageError
-from .findings import FIX_FIRST_MAX, Finding, Klass, rank
+from .errors import EXIT_FOUND, DoctorError, UsageError
+from .findings import FIX_FIRST_MAX, RANK, Finding, Klass, from_dict, rank, to_dict
+
+REPORT_FORMAT = 1
+RANKING_RULE = "class rank, minus 5 if also on Android; then count desc, earliest phase, id"
 
 
 @dataclass
@@ -130,6 +137,119 @@ def render_text(r: Report) -> str:
     return "\n".join(out)
 
 
+def render_json(r: Report) -> str:
+    doc = {
+        "format": REPORT_FORMAT, "tool": "atl-doctor", "tool_version": __version__, "mode": r.mode,
+        "environment": r.environment,
+        "probes": [{"name": p.name, "available": p.available, "reason": p.reason, "hint": p.hint} for p in r.probes],
+        "phases": r.phases,
+        "ranking": {"rule": RANKING_RULE, "ranks": {str(k): v for k, v in RANK.items()}},
+        "findings": [to_dict(f) for f in rank(r.findings)],
+        "extras": r.extras,
+    }
+    return json.dumps(doc, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+
+
+def load_json(text: str) -> Report:
+    try:
+        d = json.loads(text)
+        fmt = d["format"]
+    except (ValueError, KeyError, TypeError) as e:
+        raise DoctorError("not an atl-doctor JSON report") from e
+    if not isinstance(fmt, int) or fmt > REPORT_FORMAT:
+        raise DoctorError(f"report format {fmt} is newer than supported ({REPORT_FORMAT})")
+    return Report(d["mode"], d.get("environment", {}),
+                  [Probe(p["name"], p["available"], p.get("reason", ""), p.get("hint", "")) for p in d.get("probes", [])],
+                  d.get("phases", []), [from_dict(x) for x in d.get("findings", [])], d.get("extras", {}))
+
+
+_CSS = """
+:root{color-scheme:light dark;--bg:#fff;--fg:#1d2127;--mute:#5f6b7a;--line:#d5dae1;--card:#f5f7fa;--accent:#0b5cad}
+@media (prefers-color-scheme:dark){:root{--bg:#14171b;--fg:#e4e8ed;--mute:#9aa6b5;--line:#2c333b;--card:#1c2127;--accent:#6cb2ff}}
+body{margin:0 auto;max-width:60rem;padding:1rem;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}
+h1{font-size:1.4rem}h2{font-size:1.1rem;margin-top:1.6rem;border-bottom:1px solid var(--line)}
+details{background:var(--card);border:1px solid var(--line);border-radius:6px;margin:.4rem 0;padding:.3rem .7rem}
+summary{cursor:pointer}code,pre{font:13px/1.4 ui-monospace,monospace}pre{overflow-x:auto;margin:.4rem 0}
+.w{display:inline-block;min-width:2.5rem;text-align:right;color:var(--accent);font-weight:600}
+.m{color:var(--mute)}img{max-width:100%;border:1px solid var(--line)}
+"""
+
+
+def _e(x: object) -> str:
+    return html.escape(str(x), quote=True)
+
+
+def _image_tags(f: Finding, capture_dir: Path | None) -> list[str]:
+    tags = []
+    for rel in f.details.get("images", []) if capture_dir else []:
+        try:
+            data = (capture_dir / rel).read_bytes()
+        except OSError:
+            continue
+        tags.append(f'<img alt="{_e(rel)}" src="data:image/png;base64,{base64.b64encode(data).decode()}">')
+    return tags
+
+
+def _html_finding(f: Finding, capture_dir: Path | None) -> str:
+    occ = "".join(f"<li>{_e(o.phase)} ({_e(o.side)}): {o.count}x{' - ' + _e(o.where) if o.where else ''}</li>"
+                  for o in f.occurrences)
+    sugg = f"<p>{_e(f.suggestion)}</p>" if f.suggestion else ""
+    det = f"<pre>{_e(json.dumps(f.details, indent=2, sort_keys=True, ensure_ascii=False))}</pre>" if f.details else ""
+    return (f'<details id="{_e(f.short_id)}"><summary><span class="w">{f.weight}</span> {_e(f.title)} '
+            f'<span class="m">{_e(f.short_id)} [{f.total_count}x]</span></summary>'
+            f'{sugg}<ul>{occ}</ul>{det}{"".join(_image_tags(f, capture_dir))}</details>')
+
+
+def render_html(r: Report, capture_dir: Path | None = None) -> str:
+    ranked = rank(r.findings)
+    body = ["<h1>atl-doctor report</h1>"]
+
+    def section(title: str, inner: str) -> None:
+        if inner:
+            body.append(f"<h2>{_e(title)}</h2>{inner}")
+
+    for title, pred in SECTIONS:
+        if title == "Environment":
+            section(title, "<pre>" + _e("\n".join(_environment_lines(r))) + "</pre>")
+            if r.mode == "scan":
+                for t, lines in _coverage_sections(r):
+                    section(t, "<pre>" + _e("\n".join(lines)) + "</pre>")
+        elif title == "Fix first":
+            top = [f for f in ranked if f.klass is not Klass.OTHER][:FIX_FIRST_MAX]
+            section(title, "<ol>" + "".join(
+                f'<li><a href="#{_e(f.short_id)}">{_e(f.title)}</a> <span class="m">{f.weight}, {_e(f.short_id)}</span></li>'
+                for f in top) + "</ol>" if top else "")
+        else:
+            section(title, "".join(_html_finding(f, capture_dir) for f in ranked if pred(f)))
+    notes = _notes(r)
+    section("Notes", "<ul>" + "".join(f"<li>{_e(n)}</li>" for n in notes) + "</ul>" if notes else "")
+    return ('<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1"><title>atl-doctor report</title>'
+            f"<style>{_CSS}</style></head><body>\n" + "\n".join(body) + "\n</body></html>\n")
+
+
+def _parse_fail_on(value: str | None) -> set[Klass]:
+    if not value:
+        return set()
+    try:
+        return {Klass(v) for v in value.split(",") if v}
+    except ValueError as e:
+        raise UsageError(f"--fail-on: {e}; valid classes: {', '.join(k.value for k in Klass)}") from e
+
+
+def _emit(args: argparse.Namespace, r: Report, capture_dir: Path | None) -> int:
+    fail = _parse_fail_on(args.fail_on)
+    if args.format == "html" and not args.output:
+        raise UsageError("-f html needs -o FILE")
+    text = {"text": lambda: render_text(r), "json": lambda: render_json(r),
+            "html": lambda: render_html(r, capture_dir)}[args.format]()
+    if args.output:
+        Path(args.output).write_text(text, encoding="utf-8")
+    else:
+        sys.stdout.write(text)
+    return EXIT_FOUND if any(f.klass in fail for f in r.findings) else 0
+
+
 ENV_KEYS = ("package", "version_name", "version_code", "atl_commit", "art_commit", "apk", "started", "args",
             "exit", "signal", "duration")
 
@@ -149,12 +269,7 @@ def _run_report(args: argparse.Namespace) -> int:
 
         findings = match_log_stubs(findings, build_stub_list(Path(atl_src), []))
     env = {k: res.header[k] for k in ENV_KEYS if k in res.header}
-    text = render_text(Report("log", env, [], res.phases, findings))
-    if args.output:
-        Path(args.output).write_text(text, encoding="utf-8")
-    else:
-        sys.stdout.write(text)
-    return 0
+    return _emit(args, Report("log", env, [], res.phases, findings), None)
 
 
 def _report_capture(args: argparse.Namespace) -> int:
@@ -181,20 +296,17 @@ def _report_capture(args: argparse.Namespace) -> int:
             env["apk"] = f"{m.apk} (unreadable, stub results not checked: {e})"
     phases, findings = load_capture_findings(cap, entries, used)
     probes = [Probe(p["name"], p["available"], p.get("reason", ""), p.get("hint", "")) for p in m.probes]
-    text = render_text(Report("record", env, probes, phases, findings))
-    if args.output:
-        Path(args.output).write_text(text, encoding="utf-8")
-    else:
-        sys.stdout.write(text)
-    return 0
+    return _emit(args, Report("record", env, probes, phases, findings), cap.root)
 
 
 def register(sub: argparse._SubParsersAction) -> None:
     from .cli import common_parser
 
     p = sub.add_parser("report", help="report from a capture directory or a log", parents=[common_parser()])
-    p.add_argument("-f", "--format", choices=["text"], default="text")
+    p.add_argument("-f", "--format", choices=["text", "json", "html"], default="text")
     p.add_argument("-o", "--output", metavar="FILE", help="write to FILE instead of stdout")
+    p.add_argument("--fail-on", metavar="CLASS[,CLASS]",
+                   help="exit 4 if a finding of one of these classes exists (" + ", ".join(k.value for k in Klass) + ")")
     p.add_argument("--log", action="append", metavar="FILE", help="log mode: one log file per phase (repeatable)")
     p.add_argument("--atl-src", metavar="DIR", help="ATL source tree; match logged stub messages against its stub list "
                                                     "(default: $ATL_DOCTOR_ATL_SRC)")

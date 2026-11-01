@@ -18,6 +18,7 @@ from .log import is_platform_frame
 JANK_MS = 16.7
 HANG_MS = 100
 IDLE_GAP_MS = 1000     # a "frame" this long is a hang or idle time, not a frame
+JANK_MIN_FRAMES = 30   # fewer frames in a phase say too little: no jank finding (option --jank-min-frames)
 JANK_MIN_PCT = 10.0    # a phase with at least this share of slow frames is a finding
 JDK_PREFIXES = ("java.", "javax.", "jdk.", "sun.", "libcore.", "dalvik.", "kotlin.", "kotlinx.")
 PROBE_FRAMES = ("android.atl.ATLViewDump.",)  # atl-doctor's own view tree dump on the main thread: not the app
@@ -87,14 +88,22 @@ def _hang_frame(stack: list[str]) -> tuple[str, str]:
 
 
 def perf_findings(atl: dict[int, list[float]], android: dict[int, list[float]] | None, hangs: list[AgentEvent],
-                  gcs: list[AgentEvent], marks: list[Mark]) -> list[Finding]:
-    """jank:<phase> (>= 10 % of frames > 16.7 ms), hang:<frame> (main thread blocked), gc:<phase> (pauses)."""
+                  gcs: list[AgentEvent], marks: list[Mark], min_frames: int = JANK_MIN_FRAMES,
+                  notes: list[str] | None = None) -> list[Finding]:
+    """jank:<phase> (>= 10 % of >= min_frames frames > 16.7 ms), hang:<frame> (main thread blocked), gc:<phase>.
+
+    A phase that would be a jank finding but has too few frames adds a line to `notes` instead."""
     names = {m.index: m.name for m in marks}
     out: list[Finding] = []
     for idx in sorted(atl):
         st = frame_stats(atl[idx])
         if st["frames"] and st["over_16_7_pct"] >= JANK_MIN_PCT:
             phase = names.get(idx, f"mark {idx}")
+            if st["frames"] < min_frames:
+                if notes is not None:
+                    notes.append(f"Phase {phase}: too few frames ({st['frames']} < {min_frames}) for a jank finding, "
+                                 f"{st['over_16_7_pct']:.0f} % of them > 16.7 ms")
+                continue
             slow = sum(1 for v in atl[idx] if v > JANK_MS)
             out.append(Finding("jank", phase, Klass.JANK, f"Phase {phase}: {st['over_16_7_pct']:.0f} % of frames > 16.7 ms",
                                SUGGEST_JANK, [Occurrence(phase, idx, "atl", slow)],

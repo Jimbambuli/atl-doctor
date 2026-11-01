@@ -14,6 +14,7 @@ from typing import Any, Callable
 from . import __version__
 from .env import Probe, resolve
 from .errors import EXIT_FOUND, DoctorError, UsageError
+from .sources.perf import JANK_MIN_FRAMES
 from .findings import FIX_FIRST_MAX, RANK, Finding, Klass, from_dict, rank, to_dict
 
 REPORT_FORMAT = 1
@@ -373,7 +374,7 @@ def _apply_capture_aosp(r: Report, root: Path, aosp: str | None) -> None:
     apply_aosp(r, aosp, cap.read_manifest().environment.get("prefix"), stubs)
 
 
-def build_capture_report(path: Path) -> tuple[Report, Path]:
+def build_capture_report(path: Path, jank_min_frames: int = JANK_MIN_FRAMES) -> tuple[Report, Path]:
     from .capture import TRACE_DIR, Capture
     from .sources import load_capture_findings
     from .env import atl_jars
@@ -399,9 +400,12 @@ def build_capture_report(path: Path) -> tuple[Report, Path]:
             used |= framework_result_uses(atl_jars(Path(prefix)) if prefix else [])  # ATL's own callers count too
         except DoctorError as e:
             env["atl_jars"] = f"unreadable, ATL's own use of stub results not checked: {e}"
-    phases, findings = load_capture_findings(cap, entries, used)
+    notes: list[str] = []
+    phases, findings = load_capture_findings(cap, entries, used, jank_min_frames, notes)
     probes = [Probe(p["name"], p["available"], p.get("reason", ""), p.get("hint", "")) for p in m.probes]
     r = Report("record", env, probes, phases, findings)
+    if notes:
+        r.extras["limits"] = notes
     from .sources.stepstats import step_table
 
     steps = step_table(cap)
@@ -410,7 +414,8 @@ def build_capture_report(path: Path) -> tuple[Report, Path]:
     return r, cap.root
 
 
-def build_pair_report(atl_dir: Path, android_dir: Path, density: float | None) -> tuple[Report, Path]:
+def build_pair_report(atl_dir: Path, android_dir: Path, density: float | None,
+                      jank_min_frames: int = JANK_MIN_FRAMES) -> tuple[Report, Path]:
     """ATL capture against an Android capture: phases and view trees paired by mark name."""
     from .capture import AGENT, TREES, Capture
     from .record_atl import tree_name
@@ -421,7 +426,7 @@ def build_pair_report(atl_dir: Path, android_dir: Path, density: float | None) -
     from .sources.shots import attach_crops
     from .sources.tree import load_tree, tree_findings
 
-    r, root = build_capture_report(atl_dir)
+    r, root = build_capture_report(atl_dir, jank_min_frames)
     acap = Capture.open(android_dir)
     am = acap.read_manifest()
     if Capture.open(atl_dir).read_manifest().side != "atl" or am.side != "android":
@@ -483,9 +488,9 @@ def _report_capture(args: argparse.Namespace) -> int:
     if len(args.dirs) > 2:
         raise UsageError("report takes at most two capture directories (ATL and Android)")
     if len(args.dirs) == 2:
-        r, root = build_pair_report(Path(args.dirs[0]), Path(args.dirs[1]), args.density)
+        r, root = build_pair_report(Path(args.dirs[0]), Path(args.dirs[1]), args.density, args.jank_min_frames)
     else:
-        r, root = build_capture_report(Path(args.dirs[0]))
+        r, root = build_capture_report(Path(args.dirs[0]), args.jank_min_frames)
     _apply_capture_aosp(r, root, args.aosp)
     return _emit(args, r, root)
 
@@ -534,7 +539,7 @@ def _run_explain(args: argparse.Namespace) -> int:
         raise UsageError("explain needs -d DIR (capture directory or JSON report)")
     src = Path(args.dir)
     if src.is_dir():
-        r, root = build_capture_report(src)
+        r, root = build_capture_report(src, args.jank_min_frames)
     else:
         try:
             r, root = load_json(src.read_text(encoding="utf-8")), None
@@ -556,6 +561,16 @@ def _run_explain(args: argparse.Namespace) -> int:
     return 0
 
 
+def _positive_int(v: str) -> int:
+    try:
+        n = int(v)
+    except ValueError:
+        n = 0
+    if n < 1:
+        raise argparse.ArgumentTypeError("expects an integer >= 1")
+    return n
+
+
 def register(sub: argparse._SubParsersAction) -> None:
     from .cli import common_parser
 
@@ -571,11 +586,17 @@ def register(sub: argparse._SubParsersAction) -> None:
                                                  "missing methods with (default: $ATL_DOCTOR_AOSP)")
     p.add_argument("--density", type=float, metavar="D",
                    help="Android display density (dp scale) for the tree comparison (default: from the Android capture)")
+    p.add_argument("--jank-min-frames", type=_positive_int, default=JANK_MIN_FRAMES, metavar="N",
+                   help=f"fewest frames a phase needs for a jank finding (default {JANK_MIN_FRAMES}); fewer is noted, "
+                        "not reported")
     p.add_argument("dirs", nargs="*", metavar="DIR", help="capture directory [and Android capture directory]")
     p.set_defaults(func=_run_report)
 
     e = sub.add_parser("explain", help="show everything known about one finding", parents=[common_parser()])
     e.add_argument("-d", "--dir", metavar="DIR", help="capture directory or JSON report")
     e.add_argument("--aosp", metavar="DIR", help="AOSP source tree (root or frameworks/base; default: $ATL_DOCTOR_AOSP)")
+    e.add_argument("--jank-min-frames", type=_positive_int, default=JANK_MIN_FRAMES, metavar="N",
+                   help=f"fewest frames a phase needs for a jank finding (default {JANK_MIN_FRAMES}); fewer is noted, "
+                        "not reported")
     e.add_argument("id", metavar="ID", help="full ID, short ID or unique short-ID prefix")
     e.set_defaults(func=_run_explain)

@@ -13,14 +13,14 @@ atl-doctor \- find out why an Android app does not run correctly under Android T
 .br
 .B atl-doctor report
 [\fB\-f\fR \fItext\fR|\fIjson\fR|\fIhtml\fR] [\fB\-o\fR \fIFILE\fR] [\fB\-\-fail\-on\fR \fICLASS\fR[,\fICLASS\fR]]
-[\fB\-\-log\fR \fIFILE\fR] [\fB\-\-atl\-src\fR \fIDIR\fR] [\fB\-\-aosp\fR \fIDIR\fR] [\fB\-\-density\fR \fID\fR]
+[\fB\-\-log\fR \fIFILE\fR] [\fB\-\-atl\-src\fR \fIDIR\fR] [\fB\-\-aosp\fR \fIDIR\fR] [\fB\-\-density\fR \fID\fR] [\fB\-\-jank\-min\-frames\fR \fIN\fR]
 [\fIDIR\fR [\fIANDROID\-DIR\fR]]
 .br
 .B atl-doctor diff
 [\fB\-f\fR \fItext\fR|\fIjson\fR] [\fB\-\-fail\-on\fR \fInew\fR|\fICLASS\fR[,\fICLASS\fR]] \fIOLD.json\fR \fINEW.json\fR
 .br
 .B atl-doctor explain
-\fB\-d\fR \fIDIR\fR [\fB\-\-aosp\fR \fIDIR\fR] \fIID\fR
+\fB\-d\fR \fIDIR\fR [\fB\-\-aosp\fR \fIDIR\fR] [\fB\-\-jank\-min\-frames\fR \fIN\fR] \fIID\fR
 .br
 .B atl-doctor check
 [\fB\-\-prefix\fR \fIDIR\fR] [\fB\-\-atl\-src\fR \fIDIR\fR] [\fB\-\-aosp\fR \fIDIR\fR] [\fB\-\-android\fR]
@@ -122,6 +122,10 @@ AOSP source tree (root or frameworks/base) to compare stubs and missing methods 
 .TP
 .BI \-\-density " D"
 Android display density for the tree comparison (default: from the Android capture).
+.TP
+.BI \-\-jank\-min\-frames " N"
+Fewest frames a phase needs for a jank finding (default: 30). A phase that is slow but has fewer frames gets no
+finding; the report notes it as \(lqtoo few frames\(rq instead.
 .RE
 .TP
 .B diff
@@ -145,6 +149,10 @@ Capture directory or JSON report (required).
 .TP
 .BI \-\-aosp " DIR"
 AOSP source tree (default: $ATL_DOCTOR_AOSP).
+.TP
+.BI \-\-jank\-min\-frames " N"
+Fewest frames a phase needs for a jank finding (default: 30). A phase that is slow but has fewer frames gets no
+finding; the report notes it as \(lqtoo few frames\(rq instead.
 .RE
 .TP
 .B check

@@ -7,7 +7,7 @@ from ..findings import Finding, Klass, Occurrence, merge
 from .exceptions import exception_findings, parse_agent
 from .log import SUGGEST_CRASH, parse_log_text
 from .memory import memory_findings
-from .perf import atl_frame_intervals, perf_findings
+from .perf import JANK_MIN_FRAMES, atl_frame_intervals, perf_findings
 from .stubs import StubEntry
 from .trace import read_counter_output, stub_findings
 
@@ -15,7 +15,8 @@ TRACE_PREFIX = "tr"  # trace/tr.methods, trace/tr.counts ...
 
 
 def load_capture_findings(cap: Capture, entries: list[StubEntry] | None,
-                          result_used: set[tuple[str, str]]) -> tuple[list[str], list[Finding]]:
+                          result_used: set[tuple[str, str]], jank_min_frames: int = JANK_MIN_FRAMES,
+                          notes: list[str] | None = None) -> tuple[list[str], list[Finding]]:
     """Phase names and all findings of one capture (trace, agent, atl.log, exit status)."""
     m = cap.read_manifest()
     marks = cap.read_marks()
@@ -37,7 +38,7 @@ def load_capture_findings(cap: Capture, entries: list[StubEntry] | None,
         found += exc
         if m.side == "atl":  # Android frame times are only for comparison (report DIR ANDROID-DIR)
             found += perf_findings(atl_frame_intervals(events, marks), None, [e for e in events if e.tag == "H"],
-                                   [e for e in events if e.tag == "G"], marks)
+                                   [e for e in events if e.tag == "G"], marks, jank_min_frames, notes)
     if cap.path(ATL_LOG).is_file():
         text = cap.path(ATL_LOG).read_bytes().decode("utf-8", "replace")
         _, logged = parse_log_text(text, 0, phases[0] if phases else "start", m.side)

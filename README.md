@@ -40,6 +40,9 @@ atl-doctor explain -d run1 3f2a                       # everything about one fin
 atl-doctor diff before.json after.json --fail-on new  # after a fix: new, gone, changed; exit 4 for CI
 ```
 
+A jank finding needs at least 30 frames in the phase (`--jank-min-frames N`); with fewer, the report only notes
+"too few frames".
+
 Exit status: 0 ok, 1 error, 2 usage error, 3 required prerequisite missing, 4 findings requested with `--fail-on`.
 
 ## Scenarios

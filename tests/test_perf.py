@@ -142,3 +142,46 @@ def test_pair_report_adds_android_frames(tmp_path, capsys):
     f = next(f for f in json.loads(capsys.readouterr().out)["findings"] if f["kind"] == "jank")
     assert f["key"] == "Import" and f["details"]["atl"]["frames"] == 30
     assert f["details"]["android"]["frames"] == 3
+
+
+def test_jank_needs_a_minimum_number_of_frames():
+    three = {1: [30.0, 30.0, 10.0]}                     # 67 % slow, but only 3 frames
+    notes: list[str] = []
+    assert not [f for f in perf_findings(three, None, [], [], MARKS, notes=notes) if f.kind == "jank"]
+    assert notes == ["Phase Import: too few frames (3 < 30) for a jank finding, 67 % of them > 16.7 ms"]
+    # exactly the minimum counts; a lowered minimum lets the small phase through
+    thirty = {1: [30.0] * 30}
+    assert [f.id for f in perf_findings(thirty, None, [], [], MARKS) if f.kind == "jank"] == ["jank:Import"]
+    assert [f.id for f in perf_findings(three, None, [], [], MARKS, min_frames=3) if f.kind == "jank"] == ["jank:Import"]
+
+
+def test_few_frames_without_slow_ones_leave_no_note():
+    notes: list[str] = []
+    perf_findings({1: [5.0, 5.0]}, None, [], [], MARKS, notes=notes)
+    assert notes == []
+
+
+def test_report_option_jank_min_frames(tmp_path, capsys):
+    import json
+
+    from atl_doctor.capture import Capture
+    from atl_doctor.cli import main
+
+    a = Capture.create(tmp_path / "atl", "atl")
+    a.append_mark("Import")
+    t1 = a.read_marks()[1].boot_us
+    (tmp_path / "atl/agent.tsv").write_text("".join(f"P\t{t1 + 1000 * i}\t{i}\t30000\t0\n" for i in range(3)))
+    m = a.read_manifest()
+    m.ended = "2026-11-01T07:00:00+00:00"
+    a.write_manifest(m)
+
+    def run(*extra):
+        assert main(["report", "-f", "json", *extra, str(tmp_path / "atl")]) == 0
+        return json.loads(capsys.readouterr().out)
+
+    r = run()
+    assert not [f for f in r["findings"] if f["kind"] == "jank"]
+    assert any("too few frames (3 < 30)" in n for n in r["extras"]["limits"])
+    r = run("--jank-min-frames", "3")
+    assert [f["id"] for f in r["findings"] if f["kind"] == "jank"] == ["jank:Import"]
+    assert main(["report", "--jank-min-frames", "0", str(tmp_path / "atl")]) == 2

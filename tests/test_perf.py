@@ -78,6 +78,13 @@ def test_hang_finding_title():
     assert f.occurrences[0].phase == "Import" and f.occurrences[0].where == "org.example.demo.Main.onCreate"
 
 
+def test_view_tree_dump_is_not_an_app_hang():
+    # atl-doctor's own probe: the ATLViewDump hook runs on the main thread while it writes a tree
+    h = AgentEvent("H", 11_000_000, 42, ["1000", "android.atl.ATLViewDump.indent|android.atl.ATLViewDump.node|"
+                                                 "android.atl.ATLViewDump.dump|android.os.Handler.dispatchMessage"])
+    assert perf_findings({}, None, [h], [], MARKS) == []
+
+
 def test_longest_hang_titles_finding():
     hs = [AgentEvent("H", 1_000_000, 1, [ms, "org.example.demo.Slow.run"]) for ms in ("300", "2500", "120")]
     (f,) = perf_findings({}, None, hs, [], MARKS)

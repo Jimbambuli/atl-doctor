@@ -20,6 +20,7 @@ HANG_MS = 100
 IDLE_GAP_MS = 1000     # a "frame" this long is a hang or idle time, not a frame
 JANK_MIN_PCT = 10.0    # a phase with at least this share of slow frames is a finding
 JDK_PREFIXES = ("java.", "javax.", "jdk.", "sun.", "libcore.", "dalvik.", "kotlin.", "kotlinx.")
+PROBE_FRAMES = ("android.atl.ATLViewDump.",)  # atl-doctor's own view tree dump on the main thread: not the app
 SUGGEST_JANK = "Compare the phase with Android (report DIR ANDROID-DIR) and look at what the main thread draws."
 SUGGEST_HANG = "The main thread waits or works here instead of drawing; move the work off the main thread or find why it blocks."
 
@@ -105,6 +106,8 @@ def perf_findings(atl: dict[int, list[float]], android: dict[int, list[float]] |
         if h.tag != "H" or not h.fields[0].isdigit():
             continue
         stack = [f[2:] if f.startswith("B:") else f for f in h.fields[1].split("|") if f]
+        if any(f.startswith(PROBE_FRAMES) for f in stack):
+            continue
         top, app = _hang_frame(stack)
         ms = int(h.fields[0])
         f = by_frame.get(top)

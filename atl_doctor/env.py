@@ -55,26 +55,35 @@ def find_helper(name: str, explicit: Path | None, prefix: Path | None) -> Path |
     return None
 
 
+def lib_dir(prefix: Path) -> Path:
+    """Library directory of an ATL prefix: lib64 (art_standalone's default), or lib where only that one has ART
+    (art_standalone built with ____LIBDIR=lib, e.g. a Flatpak's /app)."""
+    for d in ("lib64", "lib"):
+        if (Path(prefix) / d / "art").is_dir():
+            return Path(prefix) / d
+    return Path(prefix) / "lib64"
+
+
 def atl_jars(prefix: Path | None) -> list[Path]:
     """ATL's Java classes (api-impl, gstub, ghax ...) of an installation prefix."""
     if prefix is None:
         return []
-    return sorted((Path(prefix) / "lib64/java/dex/android_translation_layer").glob("*.jar"))
+    return sorted((lib_dir(prefix) / "java/dex/android_translation_layer").glob("*.jar"))
 
 
 def libcore_jars(prefix: Path | None) -> list[Path]:
     """libcore host DEX jars shipped with art_standalone."""
     if prefix is None:
         return []
-    return sorted((Path(prefix) / "lib64/java/dex/art").glob("*-hostdex.jar"))
+    return sorted((lib_dir(prefix) / "java/dex/art").glob("*-hostdex.jar"))
 
 
 def jvmti_plugin(prefix: Path | None) -> Path | None:
     if prefix is None:
         return None
-    for rel in ("lib64/art/libopenjdkjvmti.so", "lib64/libopenjdkjvmti.so"):
-        if (Path(prefix) / rel).is_file():
-            return Path(prefix) / rel
+    for rel in ("art/libopenjdkjvmti.so", "libopenjdkjvmti.so"):
+        if (lib_dir(prefix) / rel).is_file():
+            return lib_dir(prefix) / rel
     return None
 
 

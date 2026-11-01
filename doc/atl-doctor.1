@@ -135,6 +135,9 @@ Classes: crash, missing, exception\-atl\-only, stub\-result\-used, tree\-visible
 .TP
 .BI \-\-log " FILE"
 Log mode: one log file per phase (repeatable).
+Lines of the agent's output that a launcher appended to the log, each after the prefix
+.RB \(lq "# atl\-doctor\-agent: " \(rq,
+give the exceptions with their stack and the agent's problems.
 .TP
 .BI \-\-atl\-src " DIR"
 ATL source tree; matches logged stub messages against its stub list (default: $ATL_DOCTOR_ATL_SRC).

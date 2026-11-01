@@ -85,3 +85,19 @@ def test_check_android_without_adb_exit_3(tmp_path, capsys, monkeypatch):
     assert main(["check", "--android"]) == 3
     cap = capsys.readouterr()
     assert "adb" in cap.out and "atl-doctor: " in cap.err
+
+
+def test_prefix_with_lib_instead_of_lib64(tmp_path):
+    """A prefix whose libraries live in lib/ (a Flatpak's /app) is found like a lib64 one."""
+    from dexgen import cls, make_dex, make_jar
+    pre = tmp_path / "app"
+    (pre / "lib/art").mkdir(parents=True)
+    (pre / "lib/art/libopenjdkjvmti.so").write_text("")
+    jars = pre / "lib/java/dex/android_translation_layer"
+    jars.mkdir(parents=True)
+    make_jar(jars / "api-impl.jar", [make_dex([cls("Landroid/atl/ATLViewDump;")])])
+    assert env.lib_dir(pre) == pre / "lib"
+    assert env.jvmti_plugin(pre) == pre / "lib/art/libopenjdkjvmti.so"
+    assert env.atl_jars(pre) == [jars / "api-impl.jar"]
+    assert env.has_viewdump(pre)
+    assert env.lib_dir(tmp_path / "nothing") == tmp_path / "nothing/lib64"

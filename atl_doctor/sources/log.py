@@ -42,6 +42,8 @@ _NO_NATIVE = re.compile(r"UnsatisfiedLinkError: No implementation found for \S+ 
 _SIGNAL = re.compile(r"Fatal signal (\d+) \((SIG[A-Z]+)\)")
 _EXIT = re.compile(r"System\.exit\((-?\d+)\)")
 _STUB_WORDS = ("stub", "not implemented", "unimplemented")
+# agent output (agent.tsv lines) that a launcher appended to its log, one line each after this prefix
+AGENT_PREFIX = "# atl-doctor-agent: "
 
 SUGGEST_MISSING = "Implement {what} in ATL (src/api-impl)."
 SUGGEST_STUBLOG = "Implement the stubbed method logged by {tag}."
@@ -70,7 +72,11 @@ def parse_log_text(text: str, phase_index: int, phase: str, side: str = "atl") -
 
     pending: tuple[str, str, bool, int] | None = None  # type, message, uncaught, line
     fatal_seen_at = -10
+    agent: list[str] = []
     for n, line in enumerate(_ANSI.sub("", text).splitlines(), 1):
+        if line.startswith(AGENT_PREFIX):
+            agent.append(line[len(AGENT_PREFIX):])
+            continue
         m = _LOGCAT.match(line)
         logcat = m.groups() if m else None
         body = logcat[2] if logcat else line
@@ -152,7 +158,25 @@ def parse_log_text(text: str, phase_index: int, phase: str, side: str = "atl") -
             code = None
         if code is not None and not ("signal" in header and code >= 128):  # exit=128+N repeats the signal
             add_crash(f"exit:{code}", f"exit status {code}", 0, Klass.CRASH if code else Klass.OTHER)
+    if agent:
+        out = _with_agent(agent, out, header, phase_index, phase, side)
     return header, merge(out)
+
+
+def _with_agent(lines: list[str], out: list[Finding], header: dict[str, str], phase_index: int, phase: str,
+                side: str) -> list[Finding]:
+    """Exceptions from embedded agent lines replace the text parser's version (the agent's has the stack);
+    the agent's problems go into the header as "agent"."""
+    from ..capture import Mark
+    from .exceptions import agent_problems, exception_findings, parse_agent_lines
+
+    events = parse_agent_lines(lines)
+    exc = exception_findings(events, [Mark(phase_index, 0, 0, phase)], side)
+    ids = {f.id for f in exc}
+    problems = agent_problems(events)
+    if problems:
+        header.setdefault("agent", "; ".join(problems))
+    return [f for f in out if f.id not in ids] + exc
 
 
 def parse_logs(paths: list[Path]) -> LogResult:

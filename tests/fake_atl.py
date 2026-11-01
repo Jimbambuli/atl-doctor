@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Test double for android-translation-layer.
 
-fake_atl.py APK [--exit-code N] [--signal SIG] [--wait] [--trace] [--viewdump] [--dump-delay S] [-X OPT ...]
-Prints a few log lines; --wait runs until SIGTERM; --trace writes a small method trace to the
+fake_atl.py APK [--exit-code N] [--signal SIG] [--wait] [--trace] [--viewdump] [--dump-delay S] [--print-env NAME]
+            [-X OPT ...]
+Prints a few log lines (--print-env: also "env NAME=value"); --wait runs until SIGTERM; --trace writes a small method trace to the
 -Xmethod-trace-file: path (one app call of Drawable.parseBlendMode); --viewdump answers ATLViewDump requests
 in $ATL_VIEWDUMP while waiting; ends with exit code N or dies by SIG.
 """
@@ -20,6 +21,9 @@ def main() -> None:
     print("hello from fake atl", flush=True)
     print("args: " + " ".join(args), flush=True)
     opt = {a for a in args if a.startswith("--")}
+    if "--print-env" in opt:
+        name = args[args.index("--print-env") + 1]
+        print(f"env {name}={os.environ.get(name)}", flush=True)
     trace = next((a.split(":", 1)[1] for a in args if a.startswith("-Xmethod-trace-file:")), None)
     if "--trace" in opt and trace:
         from tracegen import ENTER, EXIT, make_trace

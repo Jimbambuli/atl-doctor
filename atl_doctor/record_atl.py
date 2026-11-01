@@ -18,7 +18,8 @@ from pathlib import Path
 from typing import Callable
 
 from .capture import AGENT, ATL_LOG, CONTROL, MARKS, SHOTS, STEPS_DATA, STEPS_LOG, TRACE_DIR, TREES, Capture, Mark
-from .env import AGENT_LIB, INPUT_HELPER, TRACECOUNT, WHEEL_SHIM, Probe, find_helper, has_viewdump, jvmti_plugin, probe_all, resolve
+from .env import (AGENT_LIB, INPUT_HELPER, TRACECOUNT, WHEEL_SHIM, Probe, find_helper, has_viewdump, jvmti_plugin, lib_dir,
+                  probe_all, resolve)
 from .errors import DoctorError, PrerequisiteMissing, UsageError
 from .headless import APP_HEIGHT, APP_WIDTH, HeadlessSession
 from .sources.trace import write_watch_file
@@ -52,6 +53,8 @@ class RecordOptions:
     atl_args: list[str] = field(default_factory=list)
     launcher: str | None = None  # command that starts ATL instead of PREFIX/bin/android-translation-layer
     trace: bool = True  # method trace (stub hits); slows the app down a lot
+    env: dict[str, str] = field(default_factory=dict)  # added to ATL's environment (API only, e.g. a launcher program)
+    stub_list: Path | None = None  # a saved stub list (trace/stubs.tsv) instead of building one from atl_src
 
 
 def default_out_dir(now: datetime) -> Path:
@@ -70,7 +73,8 @@ def build_command(opts: RecordOptions, cap: Capture, plugin: Path | None, agent:
     if plugin and agent:
         cmd += ["-X", f"-agentpath:{agent}={c}/{AGENT},late={plugin},latesec=3,marks={c}/{MARKS},arm={c}/{ARM_FILE}"
                       f",frames,hang={HANG_MS}" + (",heap" if opts.heap else "")]
-    env = {"LD_LIBRARY_PATH": f"{opts.prefix}/lib64:{opts.prefix}/lib64/art"} if opts.prefix else {}
+    lib = lib_dir(opts.prefix) if opts.prefix else None
+    env = {"LD_LIBRARY_PATH": f"{lib}:{lib}/art"} if lib else {}
     if has_viewdump(opts.prefix):
         env["ATL_VIEWDUMP"] = f"{c}/{TREES}"
     if wheel and " " in str(wheel):  # LD_PRELOAD splits at spaces too
@@ -272,7 +276,7 @@ def record_atl(opts: RecordOptions) -> int:
     if explicit_agent and not Path(explicit_agent).is_file():
         raise PrerequisiteMissing(f"agent {explicit_agent} not found (--agent / ATL_DOCTOR_AGENT)")
     info = read_apk(opts.apk)
-    opts.apk = opts.apk.resolve()
+    opts.apk = Path(os.path.abspath(opts.apk))  # not resolved: ATL may name things after a symlink's name
     out = (opts.out or default_out_dir(datetime.now())).resolve()
     # the capture path goes into the agent's comma-separated options and its 512-byte path buffers
     if "," in str(out):
@@ -288,6 +292,8 @@ def record_atl(opts: RecordOptions) -> int:
     for i, p in enumerate(probes):
         if p.name == "agent" and (agent is not None or opts.agent is not None):  # --agent / ATL_DOCTOR_AGENT
             probes[i] = p = Probe("agent", True) if agent else Probe("agent", False, f"{opts.agent} not found", p.hint)
+        if p.name == "atl-src" and opts.stub_list and not opts.atl_src:
+            probes[i] = p = Probe("stub-list", True)
         if p.name in RECORD_PROBES and not p.available:
             _warn(f"{p.name} unavailable: {p.reason}")
     counter = find_helper(TRACECOUNT, None, opts.prefix) if opts.trace else None
@@ -301,6 +307,14 @@ def record_atl(opts: RecordOptions) -> int:
         from .sources.stubs import build_stub_list, save_stub_tsv
 
         entries = build_stub_list(opts.atl_src, atl_jars(opts.prefix))
+        save_stub_tsv(entries, trace_dir / STUBS_TSV)
+    elif opts.stub_list:
+        from .sources.stubs import load_stub_tsv, save_stub_tsv
+
+        try:
+            entries = load_stub_tsv(opts.stub_list)
+        except OSError as e:
+            raise DoctorError(f"cannot read {opts.stub_list}: {e.strerror}") from e
         save_stub_tsv(entries, trace_dir / STUBS_TSV)
     write_watch_file(entries, watch)
 
@@ -326,7 +340,8 @@ def record_atl(opts: RecordOptions) -> int:
     m.command = cmd
     m.probes = [asdict(p) for p in probes]
     m.environment = {**({"launcher": opts.launcher} if opts.launcher else {"prefix": str(opts.prefix)}),
-                     **({"atl_src": str(opts.atl_src)} if opts.atl_src else {})}
+                     **({"atl_src": str(opts.atl_src)} if opts.atl_src else {}),
+                     **({"stub_list": str(opts.stub_list)} if opts.stub_list and not opts.atl_src else {})}
     if not opts.trace:
         m.environment["trace"] = "off (--no-trace): no stub hits recorded"
     cap.write_manifest(m)
@@ -355,7 +370,7 @@ def record_atl(opts: RecordOptions) -> int:
     stop = _Stop()
     try:
         with stop, open(cap.path(ATL_LOG), "wb", buffering=0) as logf:
-            run_env = {**os.environ, **(session.env() if session else {}), **extra_env}
+            run_env = {**os.environ, **opts.env, **(session.env() if session else {}), **extra_env}
             proc = subprocess.Popen(cmd, env=run_env, stdin=subprocess.DEVNULL, stdout=logf,
                                     stderr=subprocess.STDOUT, start_new_session=True)
             m.environment["atl_pid"] = str(proc.pid)

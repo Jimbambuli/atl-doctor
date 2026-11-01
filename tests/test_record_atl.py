@@ -630,3 +630,38 @@ def test_headless_session_lets_kwin_script_output_reach_its_log(monkeypatch, tmp
     with pytest.raises(DoctorError):
         s.start()
     assert seen["env"]["QT_LOGGING_RULES"] == expected and seen["env"]["QT_FORCE_STDERR_LOGGING"] == "1"
+
+
+def test_build_command_uses_the_lib_dir_of_the_prefix(tmp_path):
+    (tmp_path / "app/lib/art").mkdir(parents=True)
+    cap = Capture.create(tmp_path / "c", "atl")
+    opts = RecordOptions(apk=Path("/x/app.apk"), out=None, prefix=tmp_path / "app", atl_src=None, agent=None)
+    _, env = build_command(opts, cap, None, None, trace=False)
+    assert env == {"LD_LIBRARY_PATH": f"{tmp_path}/app/lib:{tmp_path}/app/lib/art"}
+
+
+def test_record_api_env_stub_list_and_apk_link(tmp_prefix, apk, tmp_path):
+    """For a launcher program using record_atl() directly: extra environment for ATL, a saved stub list
+    instead of an ATL source tree, and the APK path as given (a symlink's name can matter to ATL)."""
+    from atl_doctor.record_atl import record_atl
+    from atl_doctor.sources.stubs import StubEntry, load_stub_tsv, save_stub_tsv
+
+    stubs = tmp_path / "stubs.tsv"
+    save_stub_tsv([StubEntry("stub", "android.graphics.drawable.Drawable", "parseBlendMode",
+                             "(ILandroid/graphics/BlendMode;)Landroid/graphics/BlendMode;", "Drawable.java:1",
+                             "default", "")], stubs)
+    link = tmp_path / "org.example.demo.apk"
+    link.symlink_to(apk)
+    c = tmp_path / "c"
+    opts = RecordOptions(apk=link, out=c, prefix=tmp_prefix, atl_src=None, agent=None,
+                         atl_args=["--print-env", "ATL_DOCTOR_TEST_VAR"], env={"ATL_DOCTOR_TEST_VAR": "42"},
+                         stub_list=stubs)
+    assert record_atl(opts) == 0
+    m = Capture.open(c).read_manifest()
+    assert m.command[1] == str(link) and m.apk == str(link)
+    assert "env ATL_DOCTOR_TEST_VAR=42" in (c / "atl.log").read_text()
+    assert load_stub_tsv(c / "trace/stubs.tsv") == load_stub_tsv(stubs)
+    assert "Drawable\tparseBlendMode" in (c / "trace/watch.txt").read_text()
+    probes = {p["name"]: p for p in m.probes}
+    assert probes["stub-list"]["available"] and "atl-src" not in probes
+    assert m.environment["stub_list"] == str(stubs)

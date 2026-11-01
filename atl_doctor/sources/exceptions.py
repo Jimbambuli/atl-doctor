@@ -28,6 +28,11 @@ def parse_agent(path: Path) -> list[AgentEvent]:
     text = Path(path).read_bytes().decode("utf-8", "replace")
     lines = text.split("\n")
     lines.pop()  # "" or the partial last line
+    return parse_agent_lines(lines)
+
+
+def parse_agent_lines(lines: list[str]) -> list[AgentEvent]:
+    """Complete agent lines (without newline); malformed ones are counted."""
     out, bad = [], 0
     for ln in lines:
         f = ln.split("\t")

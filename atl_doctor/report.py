@@ -308,7 +308,7 @@ def _emit(args: argparse.Namespace, r: Report, capture_dir: Path | None) -> int:
 
 
 ENV_KEYS = ("package", "version_name", "version_code", "atl_commit", "art_commit", "apk", "started", "args",
-            "exit", "signal", "duration")
+            "exit", "signal", "duration", "agent")
 
 
 def _run_report(args: argparse.Namespace) -> int:
@@ -318,21 +318,25 @@ def _run_report(args: argparse.Namespace) -> int:
         raise UsageError("--log and a capture directory exclude each other")
     if not args.log:
         return _report_capture(args)
-    from .sources.log import parse_logs
-
-    res = parse_logs([Path(p) for p in args.log])
-    findings = res.findings
     atl_src = resolve(args.atl_src, "ATL_DOCTOR_ATL_SRC")
-    from .sources.stubs import build_stub_list, match_log_stubs, stub_index
+    from .sources.stubs import build_stub_list, stub_index
 
     entries = build_stub_list(Path(atl_src), []) if atl_src else []
-    if atl_src:
-        findings = match_log_stubs(findings, entries)
-    env = {k: res.header[k] for k in ENV_KEYS if k in res.header}
-    r = Report("log", env, [], res.phases, findings)
+    r = build_log_report([Path(p) for p in args.log], entries if atl_src else None)
     if needs_aosp(r) or resolve(args.aosp, "ATL_DOCTOR_AOSP"):
         apply_aosp(r, args.aosp, None, stub_index(entries))
     return _emit(args, r, None)
+
+
+def build_log_report(paths: list[Path], stubs: list | None = None) -> Report:
+    """Report of one or more logs (one phase each); stubs: a stub list to match logged stub messages against."""
+    from .sources.log import parse_logs
+    from .sources.stubs import match_log_stubs
+
+    res = parse_logs(paths)
+    findings = match_log_stubs(res.findings, stubs) if stubs is not None else res.findings
+    env = {k: res.header[k] for k in ENV_KEYS if k in res.header}
+    return Report("log", env, [], res.phases, findings)
 
 
 def needs_aosp(r: Report) -> bool:

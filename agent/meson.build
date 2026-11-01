@@ -8,7 +8,8 @@ endif
 jni_inc = include_directories(java_home / 'include', java_home / 'include' / 'linux')
 
 cc = meson.get_compiler('c')
-helper_dir = get_option('libdir') / 'atl-doctor'
+# fixed lib/atl-doctor (not the multiarch/lib64 libdir): atl-doctor looks there, see env.HELPER_DIRS
+helper_dir = get_option('prefix') / 'lib' / 'atl-doctor'
 agent_deps = [dependency('threads'), cc.find_library('dl', required: false)]
 
 if host_machine.system() == 'android'

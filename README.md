@@ -18,7 +18,8 @@ meson setup build agent && meson install -C build   # JVMTI agent, method-trace 
 ```
 
 The helpers need a JDK (for `jni.h`); the input helper (`--headless`/`--steps`) additionally needs wayland-client,
-xkbcommon and wayland-scanner and is skipped without them. `atl-doctor check` lists what is available and how to add
+xkbcommon and wayland-scanner and is skipped without them. The helpers are installed to `<prefix>/lib/atl-doctor`
+(also on multiarch/lib64 systems; that is where `atl-doctor` looks for them). `atl-doctor check` lists what is available and how to add
 what is missing. Two optional pieces live outside this repository's build: the JVMTI plugin of ART
 (`tools/build-jvmti-plugin.sh`) and the view-tree hook (`docs/atlviewdump.md`).
 

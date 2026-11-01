@@ -1,6 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+import json
+import shutil
+import subprocess
 import tomllib
 from pathlib import Path
+
+import pytest
+
+from atl_doctor import env
 
 ROOT = Path(__file__).parent.parent
 
@@ -12,3 +19,16 @@ def test_pyproject_uses_license_expression_only():
     assert not [c for c in project["project"].get("classifiers", []) if c.startswith("License ::")]
     assert "setuptools>=77" in project["build-system"]["requires"]
 
+
+@pytest.mark.skipif(not shutil.which("meson"), reason="meson missing")
+def test_meson_installs_helpers_where_check_looks(built):
+    """Every installed helper lands in <prefix>/lib/atl-doctor, independent of the distribution's libdir."""
+    r = subprocess.run(["meson", "introspect", "--installed", str(built)], capture_output=True, text=True, check=True)
+    installed = [Path(p) for p in json.loads(r.stdout).values()]
+    opts = json.loads(subprocess.run(["meson", "introspect", "--buildoptions", str(built)], capture_output=True,
+                                     text=True, check=True).stdout)
+    prefix = Path(next(o["value"] for o in opts if o["name"] == "prefix"))
+    helpers = [p for p in installed if p.suffix != ".1"]
+    assert helpers
+    for p in helpers:
+        assert p.parent in env.HELPER_DIRS(prefix), p

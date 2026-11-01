@@ -19,7 +19,7 @@ from typing import Callable
 
 from .capture import AGENT, ATL_LOG, CONTROL, MARKS, SHOTS, STEPS_DATA, STEPS_LOG, TRACE_DIR, TREES, Capture, Mark
 from .env import AGENT_LIB, INPUT_HELPER, TRACECOUNT, WHEEL_SHIM, Probe, find_helper, has_viewdump, jvmti_plugin, probe_all, resolve
-from .errors import DoctorError, PrerequisiteMissing
+from .errors import DoctorError, PrerequisiteMissing, UsageError
 from .headless import APP_HEIGHT, APP_WIDTH, HeadlessSession
 from .sources.trace import write_watch_file
 
@@ -30,6 +30,7 @@ ARM_AFTER_S = 5.0
 TREE_WAIT_S = 30.0  # tree request (10 s) + screenshot of a mark sent by the last step
 STOP_GRACE_S = 10.0
 TRACE_FILE = "trace.bin"
+AGENT_PATH_MAX = 480  # agent buffers hold 511 bytes: capture path + "/atl-doctor-..." file names
 TRACE_PREFIX = "tr"
 STUBS_TSV = "stubs.tsv"
 WATCH = "watch.txt"
@@ -69,6 +70,9 @@ def build_command(opts: RecordOptions, cap: Capture, plugin: Path | None, agent:
     env = {"LD_LIBRARY_PATH": f"{opts.prefix}/lib64:{opts.prefix}/lib64/art"}
     if has_viewdump(opts.prefix):
         env["ATL_VIEWDUMP"] = f"{c}/{TREES}"
+    if wheel and " " in str(wheel):  # LD_PRELOAD splits at spaces too
+        _warn(f"wheel-shim not used: LD_PRELOAD cannot hold a path with spaces ({wheel})")
+        wheel = None
     if wheel:  # turns the helper's marked wheel steps into real notches (source wheel); log lets one count them
         env["LD_PRELOAD"] = ":".join([str(wheel), *filter(None, [os.environ.get("LD_PRELOAD")])])
         env["ATL_DOCTOR_WHEEL_LOG"] = f"{c}/{RUN_DIR}/wheel.log"
@@ -260,6 +264,11 @@ def record_atl(opts: RecordOptions) -> int:
     info = read_apk(opts.apk)
     opts.apk = opts.apk.resolve()
     out = (opts.out or default_out_dir(datetime.now())).resolve()
+    # the capture path goes into the agent's comma-separated options and its 512-byte path buffers
+    if "," in str(out):
+        raise UsageError(f"the capture path must not contain ',': {out}")
+    if len(str(out)) > AGENT_PATH_MAX:
+        raise UsageError(f"the capture path is too long for the agent (over {AGENT_PATH_MAX} bytes): {out}")
     cap = Capture.create(out, "atl")
     _warn(f"recording into {out}")
 

@@ -474,3 +474,12 @@ def test_verbose_shows_helpers_and_atl_command(tmp_prefix, apk, tmp_path, capsys
     assert main(["record", "-v", "-o", str(tmp_path / "b"), "--prefix", str(tmp_prefix), str(apk)]) == 0
     err = capsys.readouterr().err
     assert f"command: {tmp_prefix}/bin/android-translation-layer " in err and "helpers: agent " in err
+
+
+def test_capture_path_that_breaks_the_agent_options_exit_2(tmp_prefix, apk, tmp_path, capsys):
+    """The capture path goes into the comma-separated agent options and 512-byte buffers of the agent."""
+    for out in (tmp_path / "a,b", tmp_path / ("x" * 150) / ("y" * 150) / ("z" * 150)):
+        assert main(["record", "-o", str(out), "--prefix", str(tmp_prefix), str(apk)]) == 2
+        assert not out.exists()
+    err = capsys.readouterr().err
+    assert "must not contain ','" in err and "too long" in err

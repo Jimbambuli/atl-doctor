@@ -344,7 +344,7 @@ static void start_sampling(JNIEnv *jni) {
 	jclass k = (*jni)->FindClass(jni, "dalvik/system/VMDebug");
 	jmethodID m = k ? (*jni)->GetStaticMethodID(jni, k, "startMethodTracingFd", "(Ljava/lang/String;IIIZIZ)V") : NULL;
 	if (m) (*jni)->CallStaticVoidMethod(jni, k, m, (*jni)->NewStringUTF(jni, opt_sampletrace), (jint)fd,
-	                                    (jint)(8 << 20), (jint)0, JNI_TRUE, (jint)opt_sample_us, JNI_TRUE);
+	                                    (jint)(64 << 10), (jint)0, JNI_TRUE, (jint)opt_sample_us, JNI_TRUE);  /* small buffer: streamed often */
 	if (!m || (*jni)->ExceptionCheck(jni)) { (*jni)->ExceptionClear(jni); info("sample: VMDebug refused %s", opt_sampletrace); }
 	else { char z[32]; snprintf(z, sizeof z, "%u us", opt_sample_us); info("sample: every %s", z); }
 	close(fd);

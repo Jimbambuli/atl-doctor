@@ -20,4 +20,5 @@ else
   shared_module('atl_doctor_agent', 'atl_doctor_agent.c', name_prefix: 'lib',
                 include_directories: jni_inc, dependencies: agent_deps, install: true, install_dir: helper_dir)
   executable('atl-doctor-tracecount', 'atl_doctor_tracecount.c', install: true, install_dir: helper_dir)
+  install_data('android-wrap.sh', install_dir: helper_dir)
 endif

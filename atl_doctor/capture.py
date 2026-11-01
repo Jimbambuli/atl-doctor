@@ -116,9 +116,11 @@ class Capture:
         known = {f.name for f in fields(Manifest)}
         return Manifest(**{k: v for k, v in d.items() if k in known})
 
-    def append_mark(self, name: str | None) -> Mark:
+    def append_mark(self, name: str | None, boot_us: int | None = None) -> Mark:
+        """Next phase mark; boot_us overrides the local CLOCK_BOOTTIME (Android: the device's clock)."""
         index = len(self.read_marks())
         boot, wall = now_us()
+        boot = boot if boot_us is None else boot_us
         m = Mark(index, boot, wall, clean_mark_text(name, index))
         with open(self.path(MARKS), "a", encoding="utf-8") as f:
             f.write(f"{m.index}\t{m.boot_us}\t{m.wall_us}\t{m.name}\n")

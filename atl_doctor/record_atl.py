@@ -14,6 +14,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from .capture import AGENT, ATL_LOG, CONTROL, MARKS, TRACE_DIR, TREES, Capture, Mark
 from .env import AGENT_LIB, TRACECOUNT, Probe, find_helper, has_viewdump, jvmti_plugin, probe_all, resolve
@@ -35,7 +36,7 @@ RECORD_PROBES = ("atl-src", "jvmti-plugin", "agent", "tracecount", "viewdump")
 class RecordOptions:
     apk: Path
     out: Path | None
-    prefix: Path
+    prefix: Path | None
     atl_src: Path | None
     agent: Path | None
     headless: bool = False
@@ -112,8 +113,9 @@ def _stop_group(proc: subprocess.Popen) -> None:
         proc.wait()
 
 
-def _handle_control(cap: Capture, data: bytes, buf: bytearray) -> list[Mark]:
-    """Process complete control lines; the marks they created."""
+def _handle_control(cap: Capture, data: bytes, buf: bytearray,
+                    clock: Callable[[], int | None] | None = None) -> list[Mark]:
+    """Process complete control lines; the marks they created (clock: boot time source, default local)."""
     new = []
     buf += data
     while b"\n" in buf:
@@ -121,7 +123,7 @@ def _handle_control(cap: Capture, data: bytes, buf: bytearray) -> list[Mark]:
         buf[:] = rest
         text = line.decode("utf-8", "replace")
         if text == "mark" or text.startswith("mark "):
-            new.append(cap.append_mark(text[5:] or None))
+            new.append(cap.append_mark(text[5:] or None, clock() if clock else None))
     return new
 
 
@@ -277,6 +279,12 @@ def _newest_capture() -> Path:
 # ------------------------------------------------------------------ CLI
 def _run_record(args: argparse.Namespace) -> int:
     prefix = resolve(args.prefix, "ATL_DOCTOR_PREFIX")
+    if args.android:
+        from .record_android import record_android
+
+        return record_android(RecordOptions(apk=Path(args.apk), out=Path(args.output) if args.output else None,
+                                            prefix=Path(prefix) if prefix else None, atl_src=None, agent=None,
+                                            android=True))
     if not prefix:
         raise PrerequisiteMissing("no ATL prefix (pass --prefix DIR or set ATL_DOCTOR_PREFIX)")
     atl_src = resolve(args.atl_src, "ATL_DOCTOR_ATL_SRC")
@@ -298,6 +306,8 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--prefix", metavar="DIR", help="ATL installation prefix (default: $ATL_DOCTOR_PREFIX)")
     p.add_argument("--atl-src", metavar="DIR", help="ATL source tree for the stub list (default: $ATL_DOCTOR_ATL_SRC)")
     p.add_argument("--agent", metavar="PATH", help="JVMTI agent library (default: $ATL_DOCTOR_AGENT, then the helper dirs)")
+    p.add_argument("--android", action="store_true",
+                   help="record the same app on an Android device over adb (own capture directory)")
     p.add_argument("apk", metavar="APK")
     p.add_argument("atl_args", nargs="*", metavar="ATL-ARGS", help="after --: passed to android-translation-layer")
     p.set_defaults(func=_run_record)

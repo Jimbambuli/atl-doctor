@@ -297,10 +297,60 @@ def build_capture_report(path: Path) -> tuple[Report, Path]:
     return Report("record", env, probes, phases, findings), cap.root
 
 
+def build_pair_report(atl_dir: Path, android_dir: Path, density: float | None) -> tuple[Report, Path]:
+    """ATL capture against an Android capture: phases and view trees paired by mark name."""
+    from .capture import AGENT, TREES, Capture
+    from .record_atl import tree_name
+    from .sources import load_capture_findings
+    from .sources.exceptions import phases_by_name, compare_sides, lifecycle_findings, lifecycle_sequence, parse_agent
+    from .sources.tree import load_tree, tree_findings
+
+    r, root = build_capture_report(atl_dir)
+    acap = Capture.open(android_dir)
+    am = acap.read_manifest()
+    if Capture.open(atl_dir).read_manifest().side != "atl" or am.side != "android":
+        raise UsageError("report DIR ANDROID-DIR: the first must be an ATL capture, the second one from record --android")
+    _, android = load_capture_findings(acap, None, set())
+    findings = compare_sides(r.findings, android)
+    atl_marks, and_marks = Capture(root).read_marks(), acap.read_marks()
+    atl_names, and_names = [k.name for k in atl_marks], [k.name for k in and_marks]
+    if root.joinpath(AGENT).is_file() and acap.path(AGENT).is_file():
+        findings += lifecycle_findings(lifecycle_sequence(parse_agent(root / AGENT), atl_marks),
+                                       lifecycle_sequence(parse_agent(acap.path(AGENT)), and_marks), atl_names, and_names)
+    if density is None and am.environment.get("density"):
+        density = float(am.environment["density"])
+    trees: dict[str, Finding] = {}
+    pairs = phases_by_name(and_names)
+    for key, i in phases_by_name(atl_names).items():
+        j = pairs.get(key)
+        if j is None:
+            continue
+        ta = root / TREES / f"{tree_name(atl_marks[i])}.xml"
+        tb = acap.path(TREES) / f"{tree_name(and_marks[j])}.xml"
+        if not (ta.is_file() and tb.is_file()):
+            continue
+        for f in tree_findings(load_tree(tb, "android", density), load_tree(ta, "atl"), atl_marks[i]):
+            if f.id in trees:
+                trees[f.id].occurrences += f.occurrences
+            else:
+                trees[f.id] = f
+    findings += trees.values()
+    r.findings = findings
+    r.environment["android_capture"] = str(android_dir)
+    if density is None and trees:
+        r.environment["density"] = "unknown (assumed 1.0; pass --density)"
+    elif density is not None:
+        r.environment["density"] = str(density)
+    return r, root
+
+
 def _report_capture(args: argparse.Namespace) -> int:
-    if len(args.dirs) > 1:
-        raise DoctorError("comparing with an Android capture is not available yet")
-    r, root = build_capture_report(Path(args.dirs[0]))
+    if len(args.dirs) > 2:
+        raise UsageError("report takes at most two capture directories (ATL and Android)")
+    if len(args.dirs) == 2:
+        r, root = build_pair_report(Path(args.dirs[0]), Path(args.dirs[1]), args.density)
+    else:
+        r, root = build_capture_report(Path(args.dirs[0]))
     return _emit(args, r, root)
 
 
@@ -359,6 +409,8 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--log", action="append", metavar="FILE", help="log mode: one log file per phase (repeatable)")
     p.add_argument("--atl-src", metavar="DIR", help="ATL source tree; match logged stub messages against its stub list "
                                                     "(default: $ATL_DOCTOR_ATL_SRC)")
+    p.add_argument("--density", type=float, metavar="D",
+                   help="Android display density (dp scale) for the tree comparison (default: from the Android capture)")
     p.add_argument("dirs", nargs="*", metavar="DIR", help="capture directory [and Android capture directory]")
     p.set_defaults(func=_run_report)
 

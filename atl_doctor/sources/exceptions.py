@@ -80,3 +80,60 @@ def lifecycle_sequence(events: list[AgentEvent], marks: list[Mark]) -> dict[int,
             group = "".join(c for c in e.fields[0] if c in "AWF")
             seq[phase_of(e.t_us, marks).index].append(f"{group}:{e.fields[1]}:{e.fields[2]}")
     return dict(seq)
+
+
+ATL_ONLY_FACTOR = 3  # an exception this many times as often on ATL counts as ATL-only
+
+
+def compare_sides(atl: list[Finding], android: list[Finding]) -> list[Finding]:
+    """ATL findings with the Android capture's findings: exceptions only on ATL (or >= 3x as often) become
+    EXC_ATL_ONLY, findings on both sides are marked on_android, Android-only ones stay as OTHER."""
+    by_id = {f.id: f for f in android}
+    out = []
+    for f in atl:
+        a = by_id.pop(f.id, None)
+        if a is not None:
+            f.on_android = True
+            f.occurrences = f.occurrences + a.occurrences
+            n_atl = sum(o.count for o in f.occurrences if o.side == "atl")
+            n_and = sum(o.count for o in f.occurrences if o.side == "android")
+            if f.kind == "exc" and n_atl >= ATL_ONLY_FACTOR * n_and:
+                f.klass = Klass.EXC_ATL_ONLY
+        elif f.kind == "exc":
+            f.klass = Klass.EXC_ATL_ONLY
+        out.append(f)
+    for f in by_id.values():
+        f.klass = Klass.OTHER
+        out.append(f)
+    return out
+
+
+def phases_by_name(phases: list[str]) -> dict[tuple[str, int], int]:
+    """(name, n-th time this name occurs) -> phase index; repeated phases pair in order."""
+    seen: dict[str, int] = defaultdict(int)
+    out = {}
+    for i, name in enumerate(phases):
+        out[(name, seen[name])] = i
+        seen[name] += 1
+    return out
+
+
+def lifecycle_findings(atl_seq: dict[int, list[str]], android_seq: dict[int, list[str]], atl_phases: list[str],
+                       android_phases: list[str]) -> list[Finding]:
+    """Per phase (paired by name) the first lifecycle entry where ATL and Android differ."""
+    andr = phases_by_name(android_phases)
+    out = []
+    for (name, nth), i in phases_by_name(atl_phases).items():
+        j = andr.get((name, nth))
+        if j is None:
+            continue
+        a, b = atl_seq.get(i, []), android_seq.get(j, [])
+        k = next((k for k in range(max(len(a), len(b))) if k >= len(a) or k >= len(b) or a[k] != b[k]), None)
+        if k is None:
+            continue
+        entry = a[k] if k < len(a) else b[k]
+        what = (f"ATL {a[k]}, Android {b[k]}" if k < len(a) and k < len(b)
+                else f"only on ATL: {a[k]}" if k < len(a) else f"missing on ATL: {b[k]}")
+        out.append(Finding("lc", f"{name}:{entry}", Klass.OTHER, f"Phase {name}: lifecycle differs at step {k + 1} ({what})",
+                           occurrences=[Occurrence(name, i, "atl", 1, "")], details={"atl": a, "android": b}))
+    return out

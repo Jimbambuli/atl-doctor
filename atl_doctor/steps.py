@@ -562,18 +562,23 @@ class AtlDriver:
     def wait_window(self, match: str, timeout_s: float) -> bool:
         """Wait for a window; event_us is the time it appeared (the KWin watch script's stamp), not the time
         of the query that found it. Without a watch the windows are polled and event_us stays None."""
+        from .capture import now_us
+
         self.event_us = None
+        began_us = now_us()[0]          # events from before this step are history: that window may be gone
         end = time.monotonic() + timeout_s
+        first = True
         next_query = time.monotonic() + WINDOW_QUERY_S
         while time.monotonic() < end:
             events = self.session.window_events()
-            hit = next((e for e in events or [] if self._is_match(match, e)), None)
+            hit = next((e for e in events or [] if e["t_us"] >= began_us and self._is_match(match, e)), None)
             if hit is not None:
                 self.event_us = hit["t_us"]
-            elif events is None or time.monotonic() >= next_query:
-                # no watch, or a watch that saw nothing for a while: ask KWin directly
+            elif first or events is None or time.monotonic() >= next_query:
+                # a window already there (no event to come), no watch, or a watch that saw nothing for a while
                 next_query = time.monotonic() + WINDOW_QUERY_S
                 hit = next((w for w in self.session.windows() if self._is_match(match, w)), None)
+            first = False
             if hit is not None:
                 self.session.place_window_at_origin()
                 return True

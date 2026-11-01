@@ -69,7 +69,7 @@ Start ATL with the command \fICMD\fR (split like a shell would, not run by one) 
 Excludes \fB\-\-prefix\fR.
 Without a prefix, what needs one is not available: the JVMTI agent (frame times, hangs, \fBwait\-idle\fR),
 view trees (\fBclick "Text"\fR, \fBclick id/\fR\fINAME\fR, scroll distances) and the stub list from ATL's jars.
-\fImemory.tsv\fR stays empty, because the launcher's own process is not the app.
+There is no \fImemory.tsv\fR, because the launcher's own process is not the app.
 The app must see the APK and the capture directory (method trace, wheel log) under the same
 path (Flatpak: \fB\-\-filesystem=\fR\fIDIR\fR). The environment atl\-doctor sets goes to the launcher;
 a launcher that drops \fBLD_PRELOAD\fR (as \fBflatpak run\fR does) must pass the wheel shim on itself
@@ -89,7 +89,8 @@ Run ATL in a private invisible KWin session (kwin_wayland \-\-virtual); needed f
 Drive the app with a step file. Implies \fB\-\-headless\fR under ATL.
 Per step the capture records the time, the number of frames drawn and the distance scrolled (\fIsteps.tsv\fR).
 A \fBwait\-window\fR step ends in \fIsteps.tsv\fR at the time the window appeared (under ATL, from KWin's own clock),
-not when the step noticed it.
+not when the step noticed it. Only a window that is there when the step begins or appears while it waits counts;
+one that came and went earlier does not.
 .TP
 .B \-\-no\-trace
 No method trace. The trace slows the app down many times over (a first start can take minutes); without it

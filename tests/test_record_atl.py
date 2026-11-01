@@ -551,6 +551,58 @@ def test_no_trace_starts_without_method_trace(built, tmp_prefix, apk, tmp_path):
     assert not (c / "trace/tracecount.log").exists()
 
 
+def test_no_trace_is_said_in_the_report(built, tmp_prefix, apk, tmp_path, capsys):
+    """Without the trace there are no stub hits: the report must not read as «the app hits no stubs»."""
+    helpers = tmp_prefix / "lib/atl-doctor"
+    helpers.mkdir(parents=True)
+    shutil.copy(built / "atl-doctor-tracecount", helpers)
+    c = tmp_path / "c"
+    assert main(["record", "--no-trace", "-o", str(c), "--prefix", str(tmp_prefix), str(apk)]) == 0
+    assert "--no-trace" in Capture.open(c).read_manifest().environment["trace"]
+    capsys.readouterr()
+    assert main(["report", str(c)]) == 0
+    assert "trace: off (--no-trace)" in capsys.readouterr().out
+
+
+def test_launcher_with_broken_quoting_is_a_usage_error(apk, tmp_path, capsys):
+    assert main(["record", "-o", str(tmp_path / "c"), "--launcher", "wrap 'a b", str(apk)]) == 2
+    err = capsys.readouterr().err
+    assert "--launcher" in err and "Traceback" not in err
+
+
+def test_launcher_is_split_into_arguments_never_run_by_a_shell(tmp_path):
+    cap = Capture.create(tmp_path / "c", "atl")
+    opts = RecordOptions(apk=Path("/x/app.apk"), out=None, prefix=None, atl_src=None, agent=None, atl_args=[],
+                         launcher="wrap 'a b' \\$(x);y")
+    cmd, _ = build_command(opts, cap, None, None, trace=False)
+    assert cmd == ["wrap", "a b", "$(x);y", "/x/app.apk"]
+
+
+def test_launcher_with_android_is_refused(apk, tmp_path):
+    assert main(["record", "--android", "-o", str(tmp_path / "c"), "--launcher", "x", str(apk)]) == 2
+
+
+def test_window_events_parser(tmp_path):
+    """KWin script lines -> events: whole lines only, KWin's Date.now() onto CLOCK_BOOTTIME, a partial last line."""
+    from atl_doctor.capture import now_us
+    from atl_doctor.headless import HeadlessSession
+
+    s = HeadlessSession(tmp_path)
+    s._watching = True
+    boot, epoch = now_us()
+    ms = epoch // 1000
+    s.log.write_text(f"noise\njs: ATLWATCH\t{ms}\tdialog\tConfirm\torg.example.demo\n"
+                     f"js: ATLWATCH\t{ms}\tnormal\tHa llo\torg.example.demo\njs: ATLWATCH\t{ms}\tnor")
+    ev = s.window_events()
+    assert [(e["kind"], e["caption"], e["resource_class"]) for e in ev] == \
+        [("dialog", "Confirm", "org.example.demo"), ("normal", "Ha llo", "org.example.demo")]
+    with open(s.log, "a") as f:
+        f.write("mal\tLate\torg.example.demo\n")
+    ev = s.window_events()
+    assert [e["caption"] for e in ev][-1] == "Late" and abs(ev[0]["t_us"] - boot) < 5_000_000
+    assert s.window_events() == ev      # nothing new: nothing twice
+
+
 @pytest.mark.parametrize("rules, expected", [(None, "js.debug=true"), ("foo.info=false", "foo.info=false;js.debug=true")])
 def test_headless_session_lets_kwin_script_output_reach_its_log(monkeypatch, tmp_path, rules, expected):
     """KWin scripts print at debug level (category js) to KWin's log, which the session reads. Distributions switch

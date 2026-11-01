@@ -213,12 +213,36 @@ def test_wait_window_reports_the_event_time_not_the_time_of_the_query(tmp_path):
     from atl_doctor.capture import Capture, now_us
     from atl_doctor.steps import AtlDriver
 
-    seen = now_us()[0] - 1_900_000
+    seen = now_us()[0] + 5_000_000      # after the step began
     d = AtlDriver(Capture.create(tmp_path / "c", "atl"), _WatchSession(seen), tmp_path / "fifo", tmp_path / "st",
                   has_tree=False, frames=False)
     assert d.wait_window("org.example.demo", 5) and d.event_us == seen
     assert d.session.placed == 1
     assert d.wait_window("nothing", 0.1) is False and d.event_us is None
+
+
+def test_wait_window_ignores_events_from_before_the_step(tmp_path):
+    """A dialog that came and went (repeat N { ... wait-window ... }) must not count as there."""
+    from atl_doctor.capture import Capture, now_us
+    from atl_doctor.steps import AtlDriver
+
+    class S(_WatchSession):
+        def windows(self):
+            return []                   # the dialog is closed again
+
+    d = AtlDriver(Capture.create(tmp_path / "c", "atl"), S(now_us()[0] - 60_000_000), tmp_path / "fifo",
+                  tmp_path / "st", has_tree=False, frames=False)
+    assert d.wait_window("org.example.demo", 0.3) is False and d.event_us is None and d.session.placed == 0
+
+
+def test_wait_window_takes_a_window_that_is_already_open(tmp_path):
+    from atl_doctor.capture import Capture, now_us
+    from atl_doctor.steps import AtlDriver
+
+    d = AtlDriver(Capture.create(tmp_path / "c", "atl"), _WatchSession(now_us()[0] - 60_000_000),
+                  tmp_path / "fifo", tmp_path / "st", has_tree=False, frames=False)
+    t = time.monotonic()
+    assert d.wait_window("Demo", 5) and d.event_us is None and time.monotonic() - t < 1
 
 
 def test_wait_window_step_ends_at_the_event_time():

@@ -327,6 +327,8 @@ def record_atl(opts: RecordOptions) -> int:
     m.probes = [asdict(p) for p in probes]
     m.environment = {**({"launcher": opts.launcher} if opts.launcher else {"prefix": str(opts.prefix)}),
                      **({"atl_src": str(opts.atl_src)} if opts.atl_src else {})}
+    if not opts.trace:
+        m.environment["trace"] = "off (--no-trace): no stub hits recorded"
     cap.write_manifest(m)
 
     session = driver = None
@@ -475,6 +477,8 @@ def _newest_capture() -> Path:
 def _run_record(args: argparse.Namespace) -> int:
     prefix = resolve(args.prefix, "ATL_DOCTOR_PREFIX")
     if args.android:
+        if args.launcher:
+            raise UsageError("--launcher does not apply to --android")
         from .record_android import record_android
 
         return record_android(RecordOptions(apk=Path(args.apk), out=Path(args.output) if args.output else None,
@@ -482,6 +486,11 @@ def _run_record(args: argparse.Namespace) -> int:
                                             steps=Path(args.steps) if args.steps else None, android=True))
     if args.launcher and args.prefix:
         raise UsageError("--launcher and --prefix exclude each other")
+    if args.launcher:
+        try:
+            shlex.split(args.launcher)
+        except ValueError as e:
+            raise UsageError(f"--launcher: {e}") from None
     if args.launcher:
         prefix = None
     elif not prefix:

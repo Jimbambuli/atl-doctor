@@ -217,7 +217,7 @@ def _e(x: object) -> str:
 def _image_tags(f: Finding, capture_dir: Path | None) -> list[str]:
     tags = []
     crops = f.details.get("crops") or {}
-    rels = list(f.details.get("images", [])) + [crops[k] for k in ("atl", "android") if k in crops]
+    rels = [crops[k] for k in ("atl", "android") if k in crops]
     for rel in rels if capture_dir else []:
         try:
             data = (capture_dir / rel).read_bytes()
@@ -522,9 +522,6 @@ def render_explain(f: Finding, r: Report, capture_dir: Path | None) -> str:
         out += ["", "callers:"] + [f"  {c}" for c in f.details["callers"]]
     if f.details:
         out += ["", "details:", json.dumps(f.details, indent=2, sort_keys=True, ensure_ascii=False)]
-    images = f.details.get("images", [])
-    if images and capture_dir:
-        out += ["", "images:"] + [f"  {capture_dir / i}" for i in images]
     a = f.details.get("aosp")
     if "aosp" in f.details:
         out += ["", f"AOSP comparison (SDK {f.details.get('aosp_sdk') or 'unknown'}):"]

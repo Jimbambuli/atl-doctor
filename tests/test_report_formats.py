@@ -71,7 +71,7 @@ def test_html_requires_output(capsys):
 def test_html_escapes_and_embeds_images(tmp_path):
     (tmp_path / "a.png").write_bytes(b"\x89PNG")
     f = Finding("tree", "<b>", Klass.TREE_VISIBLE, "x <script>alert(1)</script>",
-                occurrences=[Occurrence("p", 0, "atl")], details={"images": ["a.png", "missing.png"]})
+                occurrences=[Occurrence("p", 0, "atl")], details={"crops": {"atl": "a.png", "android": "missing.png"}})
     h = render_html(Report("record", {}, [], ["p"], [f]), tmp_path)
     assert "<script>" not in h and "&lt;script&gt;" in h
     assert h.count("data:image/png;base64,") == 1 and h.count('id="') == 1

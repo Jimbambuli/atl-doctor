@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from .capture import AGENT, ATL_LOG, CONTROL, MARKS, SHOTS, STEPS_LOG, TRACE_DIR, TREES, Capture, Mark
+from .capture import AGENT, ATL_LOG, CONTROL, MARKS, SHOTS, STEPS_DATA, STEPS_LOG, TRACE_DIR, TREES, Capture, Mark
 from .env import AGENT_LIB, INPUT_HELPER, TRACECOUNT, Probe, find_helper, has_viewdump, jvmti_plugin, probe_all, resolve
 from .errors import DoctorError, PrerequisiteMissing
 from .headless import APP_HEIGHT, APP_WIDTH, HeadlessSession
@@ -213,8 +213,9 @@ def _start_steps(cap: Capture, driver, steps: list, filename: str) -> dict:
 
     def run() -> None:
         try:
-            with open(cap.path(STEPS_LOG), "w", encoding="utf-8") as log:
-                run_steps(steps, driver, filename, log)
+            with open(cap.path(STEPS_LOG), "w", encoding="utf-8") as log, \
+                    open(cap.path(STEPS_DATA), "w", encoding="utf-8") as data:
+                run_steps(steps, driver, filename, log, data)
         except DoctorError as e:
             result["error"] = e
         except Exception as e:  # noqa: BLE001 - the recording must still end cleanly

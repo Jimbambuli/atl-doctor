@@ -24,6 +24,7 @@ SHOTS = "shots"
 MEMORY = "memory.tsv"
 CONTROL = "control"
 STEPS_LOG = "steps.log"
+STEPS_DATA = "steps.tsv"
 
 
 @dataclass

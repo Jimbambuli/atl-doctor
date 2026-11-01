@@ -223,6 +223,7 @@ def test_android_steps(adb, apk, tmp_path):
     assert "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A" in c
     assert [k.name for k in Capture(out).read_marks()] == ["start", "M"]
     assert Capture(out).read_manifest().environment["stopped_by"] == "steps"
+    assert len((out / "steps.tsv").read_text().splitlines()) == 7
     assert "shell am force-stop org.example.demo" in c[-6:] or c.count("shell am force-stop org.example.demo") >= 2
 
 

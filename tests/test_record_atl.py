@@ -251,6 +251,8 @@ def test_steps_run_and_end_recording(tmp_prefix, apk, tmp_path, monkeypatch, cap
     assert [k.name for k in Capture(c).read_marks()] == ["start", "Open"]
     assert ("click", 10.0, 20.0) in drivers[0].calls
     assert len((c / "steps.log").read_text().splitlines()) == 4
+    rows = [ln.split("\t") for ln in (c / "steps.tsv").read_text().splitlines()]
+    assert [r[2] for r in rows] == ["wait-window", "mark", "click", "key"] and all(len(r) == 9 for r in rows)
     assert _FakeSession.started and _FakeSession.stopped
     assert "-w" in m.command and "1333" in m.command and "WAYLAND_DISPLAY" not in m.environment
 

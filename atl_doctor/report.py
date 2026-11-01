@@ -109,6 +109,32 @@ def _notes(r: Report) -> list[str]:
     return extra + r.extras.get("limits", [])
 
 
+def _na(v: object, unit: str = "") -> str:
+    return "n/a" if v is None else f"{v:g}{unit}"
+
+
+def _cell(row: dict, field: str, unit: str = "") -> str:
+    """ATL value, or ATL / Android for a pair."""
+    sides = [_na(row[s][field], unit) for s in ("atl", "android") if row.get(s) is not None]
+    return " / ".join(sides) if sides else "n/a"
+
+
+def _steps_header(steps: list[dict]) -> str:
+    sides = "ATL / Android" if any("android" in x and "atl" in x for x in steps) else "ATL" if any(
+        "atl" in x for x in steps) else "Android"
+    return sides
+
+
+def _step_lines(steps: list[dict]) -> list[str]:
+    head = _steps_header(steps)
+    w = max(len(x["step"]) for x in steps)
+    out = [f"{'#':>3} {'line':>4}  {'step':<{w}}  frames ({head})  scroll y ({head}, dp)  scroll x ({head}, dp)"]
+    for x in steps:
+        out.append(f"{x['n']:>3} {x['line']:>4}  {x['step']:<{w}}  {_cell(x, 'frames')}  {_cell(x, 'scroll_y_dp')}"
+                   f"  {_cell(x, 'scroll_x_dp')}")
+    return out
+
+
 def render_text(r: Report) -> str:
     ranked = rank(r.findings)
     out: list[str] = []
@@ -138,6 +164,8 @@ def render_text(r: Report) -> str:
             section(title, lines)
         else:
             section(title, [ln for f in ranked if pred(f) for ln in finding_lines(f)])
+    if r.extras.get("steps"):
+        section("Steps", _step_lines(r.extras["steps"]))
     section("Notes", _notes(r))
     return "\n".join(out)
 
@@ -176,6 +204,7 @@ h1{font-size:1.4rem}h2{font-size:1.1rem;margin-top:1.6rem;border-bottom:1px soli
 details{background:var(--card);border:1px solid var(--line);border-radius:6px;margin:.4rem 0;padding:.3rem .7rem}
 summary{cursor:pointer}code,pre{font:13px/1.4 ui-monospace,monospace}pre{overflow-x:auto;margin:.4rem 0}
 .w{display:inline-block;min-width:2.5rem;text-align:right;color:var(--accent);font-weight:600}
+table{border-collapse:collapse}td,th{border:1px solid var(--line);padding:.15rem .5rem;text-align:left}
 .m{color:var(--mute)}img{max-width:100%;border:1px solid var(--line)}
 """
 
@@ -214,6 +243,14 @@ def _html_finding(f: Finding, capture_dir: Path | None) -> str:
             f'{sugg}<ul>{occ}</ul>{det}{"".join(_image_tags(f, capture_dir))}</details>')
 
 
+def _step_table_html(steps: list[dict]) -> str:
+    head = _steps_header(steps)
+    rows = "".join(f"<tr><td>{x['n']}</td><td>{x['line']}</td><td>{_e(x['step'])}</td><td>{_e(_cell(x, 'frames'))}</td>"
+                   f"<td>{_e(_cell(x, 'scroll_y_dp'))}</td><td>{_e(_cell(x, 'scroll_x_dp'))}</td></tr>" for x in steps)
+    return (f"<table><thead><tr><th>#</th><th>line</th><th>step</th><th>frames ({head})</th>"
+            f"<th>scroll y ({head}, dp)</th><th>scroll x ({head}, dp)</th></tr></thead><tbody>{rows}</tbody></table>")
+
+
 def render_html(r: Report, capture_dir: Path | None = None) -> str:
     ranked = rank(r.findings)
     body = ["<h1>atl-doctor report</h1>"]
@@ -235,6 +272,8 @@ def render_html(r: Report, capture_dir: Path | None = None) -> str:
                 for f in top) + "</ol>" if top else "")
         else:
             section(title, "".join(_html_finding(f, capture_dir) for f in ranked if pred(f)))
+    if r.extras.get("steps"):
+        section("Steps", _step_table_html(r.extras["steps"]))
     notes = _notes(r)
     section("Notes", "<ul>" + "".join(f"<li>{_e(n)}</li>" for n in notes) + "</ul>" if notes else "")
     return ('<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
@@ -356,7 +395,13 @@ def build_capture_report(path: Path) -> tuple[Report, Path]:
             env["apk"] = f"{m.apk} (unreadable, stub results not checked: {e})"
     phases, findings = load_capture_findings(cap, entries, used)
     probes = [Probe(p["name"], p["available"], p.get("reason", ""), p.get("hint", "")) for p in m.probes]
-    return Report("record", env, probes, phases, findings), cap.root
+    r = Report("record", env, probes, phases, findings)
+    from .sources.stepstats import step_table
+
+    steps = step_table(cap)
+    if steps:
+        r.extras["steps"] = steps
+    return r, cap.root
 
 
 def build_pair_report(atl_dir: Path, android_dir: Path, density: float | None) -> tuple[Report, Path]:
@@ -415,6 +460,11 @@ def build_pair_report(atl_dir: Path, android_dir: Path, density: float | None) -
             f.details["android"] = {"values_mb": [round(v, 1) for v in vals],
                                     "growth_mb": round(growth(vals), 1)} if vals else None
     r.findings = findings
+    from .sources.stepstats import step_table
+
+    steps = step_table(Capture(root), acap)
+    if steps:
+        r.extras["steps"] = steps
     r.environment["android_capture"] = str(android_dir)
     if density is None and trees:
         r.environment["density"] = "unknown (assumed 1.0; pass --density)"

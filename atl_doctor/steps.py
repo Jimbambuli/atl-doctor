@@ -225,21 +225,100 @@ def _describe(s: Step) -> str:
     return " ".join([s.cmd] + [repr(a) if isinstance(a, str) and " " in a else str(a) for a in s.args])
 
 
-def run_steps(steps: list[Step | Repeat], driver: Driver, filename: str, log: TextIO) -> None:
-    """Run the steps in order; one line per step in log; failures raise StepError with the line number."""
+PROBED_CMDS = ("scroll", "key")   # steps that can move content: view trees before and after
+SETTLE_S = 2.0                    # a probed step is over when the drawing has settled (kinetic scrolling)
+
+
+class _Probe:
+    """Per-step figures from the optional driver methods frame_count() and scroll_tree()."""
+
+    def __init__(self, driver: Driver):
+        self.d = driver
+        self.frames: int | None = None
+        self.tree: list | None = None   # tree after the previous step, valid while nothing else ran in between
+
+    def _frames(self) -> int | None:
+        fn = getattr(self.d, "frame_count", None)
+        try:
+            return fn() if fn else None
+        except DoctorError:
+            return None
+
+    def _tree(self) -> list | None:
+        fn = getattr(self.d, "scroll_tree", None)
+        try:
+            return fn() if fn else None
+        except DoctorError:
+            return None
+
+    def _probed(self, s: Step) -> bool:
+        return s.cmd in PROBED_CMDS and getattr(self.d, "scroll_tree", None) is not None
+
+    def before(self, s: Step) -> list | None:
+        if self.frames is None:
+            self.frames = self._frames()
+        if self._probed(s):
+            return self.tree if self.tree is not None else self._tree()
+        return None
+
+    def after(self, s: Step, tree_before: list | None) -> tuple[int | None, tuple[float, float] | None]:
+        from .sources.stepstats import scroll_delta
+
+        probed = self._probed(s)
+        if probed:
+            try:
+                self.d.wait_idle(SETTLE_S)
+            except DoctorError:
+                pass
+        f1 = self._frames()
+        frames = None
+        if f1 is not None and self.frames is not None:
+            frames = f1 - self.frames if f1 >= self.frames else f1   # a counter that restarted (new phase) counts from 0
+        self.frames = f1
+        scroll = None
+        self.tree = None
+        if probed:
+            self.tree = self._tree()
+            if tree_before is not None and self.tree is not None:
+                scroll = scroll_delta(tree_before, self.tree)
+        return frames, scroll
+
+
+def run_steps(steps: list[Step | Repeat], driver: Driver, filename: str, log: TextIO,
+              data: TextIO | None = None, _state: dict | None = None) -> None:
+    """Run the steps in order; one line per step in log; failures raise StepError with the line number.
+
+    data (steps.tsv, see sources/stepstats.py) gets one row per finished step with its times and, if the driver offers
+    frame_count()/scroll_tree(), the frames drawn and the distance scrolled."""
+    from .capture import now_us
+
+    if _state is None:
+        _state = {"n": 0, "probe": _Probe(driver)}
+    probe: _Probe = _state["probe"]
     for s in steps:
         if isinstance(s, Repeat):
             for _ in range(s.count):
-                run_steps(list(s.body), driver, filename, log)
+                run_steps(list(s.body), driver, filename, log, data, _state)
             continue
         log.write(f"{time.strftime('%H:%M:%S')} {filename}:{s.line}: {_describe(s)}\n")
         log.flush()
+        _state["n"] += 1
+        t0 = now_us()[0]
+        tree = probe.before(s) if data is not None else None
         try:
             _run_one(s, driver, filename)
         except StepError:
             raise
         except DoctorError as e:  # a driver failure (input helper, adb ...) belongs to this line
             raise StepError(filename, s.line, str(e)) from e
+        if data is not None:
+            frames, scroll = probe.after(s, tree)
+            t1 = now_us()[0]
+            desc = re.sub(r"[\t\r\n]", " ", _describe(s))
+            data.write("\t".join([str(_state["n"]), str(s.line), s.cmd, desc, str(t0), str(t1),
+                                  "" if frames is None else str(frames),
+                                  *(("", "") if scroll is None else (str(scroll[0]), str(scroll[1])))]) + "\n")
+            data.flush()
 
 
 def _fmt_s(t: float) -> str:
@@ -395,6 +474,17 @@ class AtlDriver:
                 cy += top["surface"][1] - main["surface"][1]
         return cx - self.content[0], cy - self.content[1]
 
+    def scroll_tree(self) -> list | None:
+        """Nodes of a fresh view tree for the scroll distance of a step; None without ATLViewDump."""
+        from .capture import TREES
+        from .sources.tree import load_tree, request_atl_tree
+
+        if not self.has_tree:
+            return None
+        self._n_tree += 1
+        path = request_atl_tree(self.cap.path(TREES), f"scroll-{self._n_tree:03d}")
+        return load_tree(path, "atl") if path else None
+
     def key(self, combo: str) -> None:
         self._send(f"key {combo}")
 
@@ -521,6 +611,20 @@ class AndroidDriver:
         if n is None:
             return None
         return (n.rect[0] + n.rect[2]) / 2, (n.rect[1] + n.rect[3]) / 2
+
+    def scroll_tree(self) -> list | None:
+        from .capture import TREES
+        from .sources.tree import load_tree
+
+        self._n_tree += 1
+        out = self.cap.path(TREES) / f"scroll-{self._n_tree:03d}.xml"
+        self._adb("shell", "uiautomator", "dump", "/sdcard/atl-doctor.xml")
+        self._adb("pull", "/sdcard/atl-doctor.xml", str(out))
+        return load_tree(out, "android", self.density)
+
+    def frame_count(self) -> int | None:
+        """Frames the app has drawn since the last gfxinfo reset (marks reset it)."""
+        return self._frames()
 
     def key(self, combo: str) -> None:
         codes = [android_keycode(k) for k in combo.split("+")]

@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+import json
 import os
 import shutil
 import signal
@@ -14,7 +15,7 @@ import pytest
 from atl_doctor.capture import Capture
 from atl_doctor.cli import main
 from atl_doctor.record_atl import RecordOptions, build_command, default_out_dir, send_mark
-from dexgen import make_apk, make_dex
+from dexgen import cls, make_apk, make_dex, make_jar
 
 HERE = Path(__file__).resolve().parent
 
@@ -191,6 +192,27 @@ def test_record_trace_to_stub_report(built, tmp_prefix, apk, tmp_path, capsys):
     assert main(["report", str(c)]) == 0
     out = capsys.readouterr().out
     assert "stub android.graphics.drawable.Drawable#parseBlendMode" in out
+    assert "Fix first" not in out          # the app does not use the result itself
+
+
+def test_stub_result_used_by_atl_itself(built, tmp_prefix, apk, tmp_path, capsys):
+    """A placeholder result consumed by ATL's own code (ImageView -> parseBlendMode) ranks like an app use."""
+    helpers = tmp_prefix / "lib/atl-doctor"
+    helpers.mkdir(parents=True)
+    shutil.copy(built / "atl-doctor-tracecount", helpers)
+    drawable = "Landroid/graphics/drawable/Drawable;->parseBlendMode(ILandroid/graphics/BlendMode;)Landroid/graphics/BlendMode;"
+    dex_dir = tmp_prefix / "lib64/java/dex/android_translation_layer"
+    dex_dir.mkdir(parents=True)
+    make_jar(dex_dir / "api-impl.jar", [make_dex([cls("Landroid/widget/ImageView;",
+                                                       calls=[("invoke-static", drawable), ("move-result-object", 0)])])])
+    c = tmp_path / "c"
+    assert main(["record", "-o", str(c), "--prefix", str(tmp_prefix), "--atl-src", str(HERE / "data/atl-src"),
+                 str(apk), "--", "--trace"]) == 0
+    capsys.readouterr()
+    assert main(["report", "-f", "json", str(c)]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    f = next(x for x in doc["findings"] if x["id"] == "stub:android.graphics.drawable.Drawable#parseBlendMode")
+    assert f["class"] == "stub-result-used"
 
 
 def test_report_without_apk_notes_it(tmp_path, capsys):

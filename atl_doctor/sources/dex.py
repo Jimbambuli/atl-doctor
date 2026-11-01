@@ -374,14 +374,31 @@ def result_used_refs(apk: ApkInfo) -> set[tuple[str, str]]:
     one `framework_refs` reports.
     """
     app = apk.app_classes()
+    return _result_uses(apk.dexes, lambda c: _rep_of(app, c))
+
+
+def framework_result_uses(jars: list[Path]) -> set[tuple[str, str]]:
+    """(class, method name) whose result ATL's own code uses (invoke + move-result in the ATL jars)."""
+    dexes: list[Dex] = []
+    for j in jars:
+        try:
+            with zipfile.ZipFile(j) as z:
+                dexes += [Dex(z.read(n)) for n in sorted(z.namelist())
+                          if "/" not in n and n.startswith("classes") and n.endswith(".dex")]
+        except (zipfile.BadZipFile, ValueError, struct.error, OSError) as e:
+            raise DoctorError(f"cannot read {j}: {e}") from e
+    return _result_uses(dexes, lambda c: c)
+
+
+def _result_uses(dexes: list[Dex], rep) -> set[tuple[str, str]]:
     out: set[tuple[str, str]] = set()
-    for d in apk.dexes:
+    for d in dexes:
         for _, co, _ in d.code_items():
             prev: int | None = None
             for op, u, pc in d.instructions(co):
                 if prev is not None and op in MOVE_RESULT_OPS:
                     c, m = d.method(prev)
-                    out.add((dotted(_rep_of(app, c.lstrip("["))), m.split("(", 1)[0]))
+                    out.add((dotted(rep(c.lstrip("["))), m.split("(", 1)[0]))
                 prev = u[pc + 1] if op in INVOKE_OPS else None
     return out
 

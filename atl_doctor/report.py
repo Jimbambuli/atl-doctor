@@ -376,7 +376,8 @@ def _apply_capture_aosp(r: Report, root: Path, aosp: str | None) -> None:
 def build_capture_report(path: Path) -> tuple[Report, Path]:
     from .capture import TRACE_DIR, Capture
     from .sources import load_capture_findings
-    from .sources.dex import read_apk, result_used_refs
+    from .env import atl_jars
+    from .sources.dex import framework_result_uses, read_apk, result_used_refs
     from .sources.stubs import load_stub_tsv
 
     cap = Capture.open(path)
@@ -393,6 +394,11 @@ def build_capture_report(path: Path) -> tuple[Report, Path]:
             used = result_used_refs(read_apk(Path(m.apk)))
         except DoctorError as e:
             env["apk"] = f"{m.apk} (unreadable, stub results not checked: {e})"
+        prefix = m.environment.get("prefix")
+        try:
+            used |= framework_result_uses(atl_jars(Path(prefix)) if prefix else [])  # ATL's own callers count too
+        except DoctorError as e:
+            env["atl_jars"] = f"unreadable, ATL's own use of stub results not checked: {e}"
     phases, findings = load_capture_findings(cap, entries, used)
     probes = [Probe(p["name"], p["available"], p.get("reason", ""), p.get("hint", "")) for p in m.probes]
     r = Report("record", env, probes, phases, findings)

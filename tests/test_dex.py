@@ -4,7 +4,8 @@ import zipfile
 import pytest
 
 from atl_doctor.errors import DoctorError
-from atl_doctor.sources.dex import Ref, World, framework_refs, parse_axml, read_apk, result_used_refs
+from atl_doctor.sources.dex import (Ref, World, framework_refs, framework_result_uses, parse_axml, read_apk,
+                                    result_used_refs)
 from dexgen import cls, make_apk, make_axml, make_dex, make_jar
 
 
@@ -54,6 +55,17 @@ def test_result_used_refs(tmp_path):
     a = apk_with_calls(tmp_path, [("invoke-static", drawable), ("move-result-object", 0),
                                   ("invoke-static", "Landroid/util/Log;->d(Ljava/lang/String;)I"), ("nop",)])
     used = result_used_refs(a)
+    assert ("android.graphics.drawable.Drawable", "parseBlendMode") in used
+    assert ("android.util.Log", "d") not in used
+
+
+def test_framework_result_uses_in_atl_jars(tmp_path):
+    # ATL's own ImageView feeds the placeholder of Drawable.parseBlendMode into its drawing
+    drawable = "Landroid/graphics/drawable/Drawable;->parseBlendMode(ILandroid/graphics/BlendMode;)Landroid/graphics/BlendMode;"
+    iv = cls("Landroid/widget/ImageView;", calls=[("invoke-static", drawable), ("move-result-object", 0),
+                                                 ("invoke-static", "Landroid/util/Log;->d(Ljava/lang/String;)I"), ("nop",)])
+    jar = make_jar(tmp_path / "api-impl.jar", [make_dex([iv])])
+    used = framework_result_uses([jar])
     assert ("android.graphics.drawable.Drawable", "parseBlendMode") in used
     assert ("android.util.Log", "d") not in used
 

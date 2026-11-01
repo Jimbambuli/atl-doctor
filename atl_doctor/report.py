@@ -375,8 +375,9 @@ def _apply_capture_aosp(r: Report, root: Path, aosp: str | None) -> None:
 
 
 def build_capture_report(path: Path, jank_min_frames: int = JANK_MIN_FRAMES) -> tuple[Report, Path]:
-    from .capture import TRACE_DIR, Capture
+    from .capture import AGENT, TRACE_DIR, Capture
     from .sources import load_capture_findings
+    from .sources.exceptions import agent_problems, parse_agent
     from .env import atl_jars
     from .sources.dex import PARSE_ERRORS, framework_result_uses, read_apk, result_used_refs
     from .sources.stubs import load_stub_tsv
@@ -402,6 +403,10 @@ def build_capture_report(path: Path, jank_min_frames: int = JANK_MIN_FRAMES) -> 
             used |= framework_result_uses(atl_jars(Path(prefix)) if prefix else [])  # ATL's own callers count too
         except (DoctorError, *PARSE_ERRORS) as e:
             env["atl_jars"] = f"unreadable, ATL's own use of stub results not checked: {e}"
+    if cap.path(AGENT).is_file():
+        problems = agent_problems(parse_agent(cap.path(AGENT)))
+        if problems:
+            env["agent"] = "; ".join(problems)
     notes: list[str] = []
     phases, findings = load_capture_findings(cap, entries, used, jank_min_frames, notes)
     probes = [Probe(p["name"], p["available"], p.get("reason", ""), p.get("hint", "")) for p in m.probes]

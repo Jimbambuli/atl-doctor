@@ -41,6 +41,17 @@ def parse_agent(path: Path) -> list[AgentEvent]:
     return out
 
 
+# I lines that mean a probe of the agent did not work (the others are progress notes)
+AGENT_PROBLEMS = ("late: attach failed", "late: cannot load plugin", "no JVMTI environment", "AddCapabilities failed",
+                  "SetBreakpoint failed", "unknown option", "frames unavailable", "hang: no thread named main",
+                  "heap: cannot tag objects", "heap: class counting failed", "gc pauses unavailable", "skipped ")
+
+
+def agent_problems(events: list[AgentEvent]) -> list[str]:
+    """The agent's runtime problems, each text once, in order."""
+    return list(dict.fromkeys(e.fields[0] for e in events if e.tag == "I" and e.fields[0].startswith(AGENT_PROBLEMS)))
+
+
 def _frame(f: str) -> str:
     return normalize_text(f[2:] if f.startswith("B:") else f)
 

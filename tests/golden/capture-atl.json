@@ -1,5 +1,6 @@
 {
   "environment": {
+    "agent": "skipped 1 malformed lines",
     "apk": "demo.apk",
     "ended": "2026-11-01T10:01:00+00:00",
     "package": "org.example.demo",

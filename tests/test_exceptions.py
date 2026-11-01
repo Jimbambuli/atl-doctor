@@ -88,3 +88,22 @@ def test_aborted_recording_and_exit_code(tmp_path):
     m.exit_status = 0
     c.write_manifest(m)
     assert load_capture_findings(c, None, set()) == (["start"], [])
+
+
+def test_agent_runtime_problems_reach_the_environment(tmp_path, capsys):
+    """A plugin that did not load (or no JVMTI) must not look like "no exceptions": the report says so."""
+    from atl_doctor.cli import main
+
+    cap = Capture.create(tmp_path / "c", "atl")
+    (cap.root / "agent.tsv").write_text(
+        "I\t1\t7\tloaded, plugin later x\n"
+        "I\t2\t7\tlate: cannot load plugin: libopenjdkjvmti.so: no such file\n"
+        "I\t3\t7\tlate: cannot load plugin: libopenjdkjvmti.so: no such file\n"
+        "I\t4\t7\tframes unavailable: no GTK in the process\n"
+        "garbage\n")
+    assert main(["report", str(cap.root)]) == 0
+    out = capsys.readouterr().out
+    agent_lines = [ln for ln in out.splitlines() if "agent" in ln and "late: cannot load plugin" in ln]
+    assert len(agent_lines) == 1 and out.count("late: cannot load plugin") == 1
+    assert "frames unavailable" in agent_lines[0] and "skipped 1 malformed lines" in agent_lines[0]
+    assert "loaded, plugin later" not in out

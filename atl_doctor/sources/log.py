@@ -150,7 +150,7 @@ def parse_log_text(text: str, phase_index: int, phase: str, side: str = "atl") -
             code = int(header["exit"])
         except ValueError:
             code = None
-        if code is not None:
+        if code is not None and not ("signal" in header and code >= 128):  # exit=128+N repeats the signal
             add_crash(f"exit:{code}", f"exit status {code}", 0, Klass.CRASH if code else Klass.OTHER)
     return header, merge(out)
 

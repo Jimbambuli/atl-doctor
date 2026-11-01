@@ -1,0 +1,6 @@
+# apk-starter: format=1
+# apk-starter: package=org.example.demo
+I/ATL(1): hello
+# apk-starter: signal=SIGSEGV
+# apk-starter: exit=139
+# apk-starter: duration=3.4

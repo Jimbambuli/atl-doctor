@@ -66,3 +66,10 @@ def test_platform_frames():
     assert is_platform_frame("android.app.Activity.onCreate")
     assert not is_platform_frame("androidx.core.Foo.bar")
     assert not is_platform_frame("com.example.Foo")
+
+
+def test_apk_starter_signal_trailer_is_one_crash():
+    r = parse_logs([DATA / "apk-starter-signal.log"])
+    assert r.header["signal"] == "SIGSEGV" and r.header["exit"] == "139" and r.header["duration"] == "3.4"
+    ids = {f.id for f in r.findings}
+    assert "crash:signal:SIGSEGV" in ids and "crash:exit:139" not in ids

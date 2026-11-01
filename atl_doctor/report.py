@@ -138,7 +138,7 @@ def _run_report(args: argparse.Namespace) -> int:
     if not args.log and not args.dirs:
         raise UsageError("report needs --log FILE or a capture directory")
     if not args.log:
-        raise DoctorError("reports from capture directories are not available yet")
+        return _report_capture(args)
     from .sources.log import parse_logs
 
     res = parse_logs([Path(p) for p in args.log])
@@ -150,6 +150,38 @@ def _run_report(args: argparse.Namespace) -> int:
         findings = match_log_stubs(findings, build_stub_list(Path(atl_src), []))
     env = {k: res.header[k] for k in ENV_KEYS if k in res.header}
     text = render_text(Report("log", env, [], res.phases, findings))
+    if args.output:
+        Path(args.output).write_text(text, encoding="utf-8")
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+def _report_capture(args: argparse.Namespace) -> int:
+    from .capture import TRACE_DIR, Capture
+    from .sources import load_capture_findings
+    from .sources.dex import read_apk, result_used_refs
+    from .sources.stubs import load_stub_tsv
+
+    if len(args.dirs) > 1:
+        raise DoctorError("comparing with an Android capture is not available yet")
+    cap = Capture.open(Path(args.dirs[0]))
+    m = cap.read_manifest()
+    stubs = cap.path(TRACE_DIR) / "stubs.tsv"
+    entries = load_stub_tsv(stubs) if stubs.is_file() else None
+    env = {k: v for k, v in (("package", m.package), ("version_name", m.version_name), ("apk", m.apk),
+                             ("started", m.started), ("ended", m.ended), ("signal", m.signal)) if v}
+    if m.exit_status is not None:
+        env["exit"] = str(m.exit_status)
+    used: set[tuple[str, str]] = set()
+    if entries is not None:
+        try:
+            used = result_used_refs(read_apk(Path(m.apk)))
+        except DoctorError as e:
+            env["apk"] = f"{m.apk} (unreadable, stub results not checked: {e})"
+    phases, findings = load_capture_findings(cap, entries, used)
+    probes = [Probe(p["name"], p["available"], p.get("reason", ""), p.get("hint", "")) for p in m.probes]
+    text = render_text(Report("record", env, probes, phases, findings))
     if args.output:
         Path(args.output).write_text(text, encoding="utf-8")
     else:

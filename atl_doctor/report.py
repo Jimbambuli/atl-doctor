@@ -167,6 +167,10 @@ def render_text(r: Report) -> str:
             section(title, [ln for f in ranked if pred(f) for ln in finding_lines(f)])
     if r.extras.get("steps"):
         section("Steps", _step_lines(r.extras["steps"]))
+    if r.extras.get("timeline"):
+        from .sources.timeline import timeline_lines
+
+        section("Time line (busiest methods per phase, self time)", timeline_lines(r.extras["timeline"]))
     section("Notes", _notes(r))
     return "\n".join(out)
 
@@ -275,6 +279,10 @@ def render_html(r: Report, capture_dir: Path | None = None) -> str:
             section(title, "".join(_html_finding(f, capture_dir) for f in ranked if pred(f)))
     if r.extras.get("steps"):
         section("Steps", _step_table_html(r.extras["steps"]))
+    if r.extras.get("timeline"):
+        from .sources.timeline import timeline_lines
+
+        section("Time line", "<pre>" + _e("\n".join(timeline_lines(r.extras["timeline"]))) + "</pre>")
     notes = _notes(r)
     section("Notes", "<ul>" + "".join(f"<li>{_e(n)}</li>" for n in notes) + "</ul>" if notes else "")
     return ('<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
@@ -429,6 +437,11 @@ def build_capture_report(path: Path, jank_min_frames: int = JANK_MIN_FRAMES) -> 
     steps = step_table(cap)
     if steps:
         r.extras["steps"] = steps
+    from .sources.timeline import read_timeline
+
+    timeline = read_timeline(cap.path(TRACE_DIR), cap.read_marks())
+    if timeline:
+        r.extras["timeline"] = timeline
     return r, cap.root
 
 

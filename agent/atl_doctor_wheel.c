@@ -72,7 +72,7 @@ int wl_proxy_add_listener(struct wl_proxy *proxy, void (**impl)(void), void *dat
 	static int (*real)(struct wl_proxy *, void (**)(void), void *);
 
 	if (!real)
-		real = dlsym(RTLD_NEXT, "wl_proxy_add_listener");
+		*(void **)&real = dlsym(RTLD_NEXT, "wl_proxy_add_listener");
 	if (strcmp(wl_proxy_get_class(proxy), "wl_pointer") == 0) {
 		struct wrap *w = calloc(1, sizeof *w);
 

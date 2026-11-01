@@ -588,7 +588,8 @@ static void *late_thread(void *arg) {
 	JavaVMAttachArgs aa = { JNI_VERSION_1_6, (char *)"atl-doctor-late", NULL };
 	if ((*vm)->AttachCurrentThread(vm, (void **)&jni, &aa) != JNI_OK) { info("late: attach failed%s", ""); return NULL; }
 	void *h = dlopen(opt_late, RTLD_NOW | RTLD_GLOBAL);
-	bool (*init)(void) = h ? (bool (*)(void))dlsym(h, "ArtPlugin_Initialize") : NULL;
+	bool (*init)(void) = NULL;
+	if (h) *(void **)&init = dlsym(h, "ArtPlugin_Initialize"); /* like SYM: no object-to-function cast (-Wpedantic) */
 	if (!init) { info("late: cannot load plugin: %s", dlerror()); (*vm)->DetachCurrentThread(vm); return NULL; }
 	init();
 	if (setup_env(vm) == JNI_OK) { info("late: plugin loaded %s", opt_late); cb_vm_init(J, jni, NULL); }

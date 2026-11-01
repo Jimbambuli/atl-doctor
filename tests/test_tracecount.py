@@ -129,3 +129,14 @@ def test_tracecount_phase_limit(built, tmp_path):
     assert r.returncode == 0, r.stderr
     assert "255\t0x4\t1" in table(f"{out}.counts")
     assert r.stderr.count("phase limit 256 reached") == 1
+
+
+def test_tracecount_header_longer_than_the_file(built, tmp_path):
+    """A header length beyond the data read so far is waited for, not trusted (no underflow, no crash)."""
+    import struct
+    h = bytearray(header(0xF3, START) + method_op(METHODS))
+    struct.pack_into("<H", h, 6, 4000)
+    trace = tmp_path / "t.bin"
+    trace.write_bytes(bytes(h))
+    r = run_counter(built, trace, marks(tmp_path / "m.tsv", START), tmp_path / "tr", watch(tmp_path / "w.txt"))
+    assert r.returncode == 0, r.stderr

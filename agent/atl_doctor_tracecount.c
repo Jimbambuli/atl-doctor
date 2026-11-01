@@ -50,13 +50,18 @@ static uint32_t nwatch;
 static uint32_t *stk[65536];
 static uint16_t sdep[65536];
 
+static void *need(void *p) {
+	if (!p) { fputs("atl-doctor-tracecount: out of memory\n", stderr); exit(2); }
+	return p;
+}
+
 static uint32_t slot(uint64_t k, uint32_t cap) { return (uint32_t)((k * 0x9E3779B97F4A7C15ull) >> 40) & (cap - 1); }
 
 static void table_add(table_t *tb, uint64_t k) {
-	if (!tb->t) { tb->cap = 1u << 12; tb->t = calloc(tb->cap, sizeof(ent_t)); }
+	if (!tb->t) { tb->cap = 1u << 12; tb->t = need(calloc(tb->cap, sizeof(ent_t))); }
 	if (tb->used * 2 >= tb->cap) {
 		uint32_t oc = tb->cap; ent_t *o = tb->t;
-		tb->cap = oc * 2; tb->t = calloc(tb->cap, sizeof(ent_t));
+		tb->cap = oc * 2; tb->t = need(calloc(tb->cap, sizeof(ent_t)));
 		for (uint32_t i = 0; i < oc; i++) if (o[i].n) {
 			uint32_t h = slot(o[i].k, tb->cap);
 			while (tb->t[h].n) h = (h + 1) & (tb->cap - 1);
@@ -75,12 +80,12 @@ static int cmpstr(const void *a, const void *b) { return strcmp(*(char *const *)
 static void load_watch(const char *p) {
 	FILE *f = fopen(p, "r");
 	if (!f) { perror(p); exit(2); }
-	char line[4096]; uint32_t cap = 4096; watch = malloc(cap * sizeof(char *));
+	char line[4096]; uint32_t cap = 4096; watch = need(malloc(cap * sizeof(char *)));
 	while (fgets(line, sizeof line, f)) {
 		line[strcspn(line, "\n")] = 0;
 		if (!*line) continue;
-		if (nwatch == cap) { cap *= 2; watch = realloc(watch, cap * sizeof(char *)); }
-		watch[nwatch++] = strdup(line);
+		if (nwatch == cap) { cap *= 2; watch = need(realloc(watch, cap * sizeof(char *))); }
+		watch[nwatch++] = need(strdup(line));
 	}
 	fclose(f);
 	qsort(watch, nwatch, sizeof(char *), cmpstr);
@@ -163,7 +168,7 @@ static FILE *open_out(const char *out, const char *ext) {
 }
 
 static void enter(uint16_t tid, uint32_t id, uint8_t ph) {
-	if (!cnt[ph]) cnt[ph] = calloc(MAXM, sizeof(uint32_t));
+	if (!cnt[ph]) cnt[ph] = need(calloc(MAXM, sizeof(uint32_t)));
 	cnt[ph][id]++;
 	if (mflag[id] & F_WATCH) {
 		uint32_t fr = NONE, kind = 0, d = sdep[tid] > STACK ? STACK : sdep[tid];
@@ -205,7 +210,7 @@ int main(int argc, char **argv) {
 	if (argc != 6) { fprintf(stderr, "usage: atl-doctor-tracecount TRACE MARKS OUTPREFIX WATCH APP_PREFIX\n"); return 2; }
 	marksfile = argv[2]; app_pfx = argv[5];
 	const char *out = argv[3];
-	mflag = calloc(MAXM, 1);
+	mflag = need(calloc(MAXM, 1));
 	load_watch(argv[4]);
 	FILE *fm = open_out(out, "methods"), *ft = open_out(out, "threads");
 	char stoppath[4096]; snprintf(stoppath, sizeof stoppath, "%s.stop", out);
@@ -216,7 +221,7 @@ int main(int argc, char **argv) {
 		if (access(stoppath, F_OK) == 0) { fclose(fm); fclose(ft); write_results(out); return 0; }  // no trace at all
 		usleep(200000);
 	}
-	uint64_t cap = 32u << 20; uint8_t *buf = malloc(cap);
+	uint64_t cap = 32u << 20; uint8_t *buf = need(malloc(cap));
 	uint64_t have = 0, used = 0, pos = 0, punched = 0, recs = 0;
 	uint8_t hdr = 0, eof_seen = 0; uint16_t recsz = 14; uint64_t start_us = 0; uint32_t last_wall = 0; uint64_t wrap = 0;
 	uint32_t since_reload = 0;
@@ -240,6 +245,7 @@ int main(int argc, char **argv) {
 			// 2 = single clock, 3 = dual clock (record size in the header); streaming mode adds 0xF0
 			recsz = (ver & 0x0F) >= 3 ? (uint16_t)(buf[16] | (buf[17] << 8)) : 10;
 			if (recsz < 10) { fprintf(stderr, "atl-doctor-tracecount: bad record size %u\n", recsz); return 1; }
+			if (hl > have) continue;  // header not complete yet
 			used = hl; hdr = 1;
 			continue;
 		}
@@ -274,7 +280,7 @@ int main(int argc, char **argv) {
 			last_wall = wall;
 			uint32_t id = mv >> 2;
 			if (id >= MAXM) continue;
-			if (!stk[tid]) stk[tid] = calloc(STACK, sizeof(uint32_t));
+			if (!stk[tid]) stk[tid] = need(calloc(STACK, sizeof(uint32_t)));
 			if ((mv & 3) == 0) enter(tid, id, phase_at(start_us + wrap + wall));
 			else leave(tid, id);
 		}

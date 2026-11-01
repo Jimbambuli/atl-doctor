@@ -2,8 +2,10 @@
 
 `atl-doctor` compares the View tree of an app under ATL with the tree `uiautomator dump` gives on
 Android. ATL has no built-in way to dump its View tree yet. Until it has, the tree comes from a small
-hook, *ATLViewDump*, kept as a local patch in the atl-patches repository
-(`patches/lokal/atl/0003-DEBUG-ONLY-ATLViewDump-View-tree-dump-in-uiautomator.patch`).
+hook, *ATLViewDump*, kept as a patch in this repository:
+`contrib/atl/0001-ATLViewDump-View-tree-dump-in-uiautomator-form.patch` (GPL-3.0-or-later like ATL).
+It is made against ATL `master` at `c65b272326` (October 2026); apply it with `git am` in the ATL
+source tree and rebuild ATL.
 
 Without the hook everything else works; `atl-doctor check` lists the probe `viewdump` as missing and
 reports have no view tree section.
@@ -63,5 +65,5 @@ The hook is meant to become a merge request to ATL. Whether ATL offers it as an 
 
 ### Format accepted upstream will be supported
 
-Whatever format and trigger ATL accepts upstream, `atl-doctor` will read it; the local patch format
+Whatever format and trigger ATL accepts upstream, `atl-doctor` will read it; the format of the patch
 above stays supported as long as it is in use.

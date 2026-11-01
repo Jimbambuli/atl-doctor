@@ -1,0 +1,17 @@
+# Type into the address field of a free browser (Lightning, F-Droid: acr.browser.lightning),
+# clear it again and compare the field's height, text and frames with Android.
+#
+#   atl-doctor record --headless --steps examples/search-field.steps -o atl-run lightning.apk
+#   atl-doctor record --android  --steps examples/search-field.steps -o android-run lightning.apk
+#   atl-doctor report atl-run android-run
+wait-window acr.browser.lightning 60
+wait-idle 15
+mark "Start page"
+click id/search
+mark "Field focused"
+type "example.org"
+mark "Typed"
+key ctrl+a
+key BackSpace
+mark "Cleared"
+screenshot "end"

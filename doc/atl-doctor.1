@@ -1,0 +1,280 @@
+.\" SPDX-License-Identifier: GPL-3.0-or-later
+.TH ATL\-DOCTOR 1 "November 2026" "atl-doctor 0.1.0" "User Commands"
+.SH NAME
+atl-doctor \- find out why an Android app does not run correctly under Android Translation Layer
+.SH SYNOPSIS
+.B atl-doctor record
+[\fB\-o\fR \fIDIR\fR] [\fB\-\-android\fR] [\fB\-\-prefix\fR \fIDIR\fR] [\fB\-\-atl\-src\fR \fIDIR\fR]
+[\fB\-\-agent\fR \fIPATH\fR] [\fB\-\-headless\fR] [\fB\-\-steps\fR \fIFILE\fR] [\fB\-\-heap\fR]
+\fIAPK\fR [\fB\-\-\fR \fIATL\-ARGS\fR]
+.br
+.B atl-doctor mark
+[\fB\-d\fR \fIDIR\fR] [\fITEXT\fR]
+.br
+.B atl-doctor report
+[\fB\-f\fR \fItext\fR|\fIjson\fR|\fIhtml\fR] [\fB\-o\fR \fIFILE\fR] [\fB\-\-fail\-on\fR \fICLASS\fR[,\fICLASS\fR]]
+[\fB\-\-log\fR \fIFILE\fR] [\fB\-\-atl\-src\fR \fIDIR\fR] [\fB\-\-aosp\fR \fIDIR\fR] [\fB\-\-density\fR \fID\fR]
+[\fIDIR\fR [\fIANDROID\-DIR\fR]]
+.br
+.B atl-doctor diff
+[\fB\-f\fR \fItext\fR|\fIjson\fR] [\fB\-\-fail\-on\fR \fInew\fR|\fICLASS\fR[,\fICLASS\fR]] \fIOLD.json\fR \fINEW.json\fR
+.br
+.B atl-doctor explain
+\fB\-d\fR \fIDIR\fR [\fB\-\-aosp\fR \fIDIR\fR] \fIID\fR
+.br
+.B atl-doctor check
+[\fB\-\-prefix\fR \fIDIR\fR] [\fB\-\-atl\-src\fR \fIDIR\fR] [\fB\-\-aosp\fR \fIDIR\fR] [\fB\-\-android\fR]
+.br
+.B atl-doctor scan
+[\fB\-f\fR \fItext\fR] [\fB\-o\fR \fIFILE\fR] [\fB\-\-atl\-src\fR \fIDIR\fR] [\fB\-\-prefix\fR \fIDIR\fR]
+[\fB\-\-compare\-src\fR \fIDIR\fR] [\fB\-\-aosp\fR \fIDIR\fR] [\fB\-\-sdk\-int\fR \fIN\fR] \fIAPK\fR...
+.PP
+.B atl-doctor
+[\fB\-\-version\fR] [\fB\-h\fR|\fB\-\-help\fR]
+.PP
+Every command also takes \fB\-q\fR (\fB\-\-quiet\fR), \fB\-v\fR (\fB\-\-verbose\fR)
+and \fB\-h\fR (\fB\-\-help\fR).
+.SH DESCRIPTION
+.B atl-doctor
+records an app under Android Translation Layer (ATL) and, if asked, on an Android device, and reports what
+is most worth fixing in ATL: stubs that were hit, missing methods, swallowed exceptions, differences in the
+view tree, slow frames, hangs and memory growth.
+Findings are ranked by what to fix first and carry a stable ID, so two reports can be compared with
+.BR "atl-doctor diff" .
+.PP
+Results go to standard output, messages to standard error.
+The tool never asks questions and never opens a browser.
+If an optional probe is missing, one line on standard error says so and the recording goes on without it;
+.B atl-doctor check
+lists what is missing and how to add it.
+.SH COMMANDS
+.TP
+.B record
+Run \fIAPK\fR under ATL until it ends or until SIGINT, and write a capture directory.
+Arguments after \fB\-\-\fR go to android\-translation\-layer.
+.RS
+.TP
+.BR \-o ", " \-\-output " \fIDIR\fR"
+Capture directory (default: \fI./atl\-doctor\-YYYYmmdd\-HHMMSS\fR, with \fB\-android\fR appended for \fB\-\-android\fR).
+It must not exist or must be empty.
+.TP
+.BI \-\-prefix " DIR"
+ATL installation prefix (default: $ATL_DOCTOR_PREFIX).
+.TP
+.BI \-\-atl\-src " DIR"
+ATL source tree; used to build the list of stubs that are watched (default: $ATL_DOCTOR_ATL_SRC).
+.TP
+.BI \-\-agent " PATH"
+JVMTI agent library (default: $ATL_DOCTOR_AGENT, then the helper directories).
+.TP
+.B \-\-headless
+Run ATL in a private invisible KWin session (kwin_wayland \-\-virtual); needed for screenshots.
+.TP
+.BI \-\-steps " FILE"
+Drive the app with a step file. Implies \fB\-\-headless\fR under ATL.
+Per step the capture records the time, the number of frames drawn and the distance scrolled (\fIsteps.tsv\fR).
+.TP
+.B \-\-heap
+Count instances and bytes per class at every mark (agent; slow, forces a garbage collection per mark).
+.TP
+.B \-\-android
+Record the same app on an Android device over adb instead (own capture directory).
+.TP
+.BR \-q ", " \-\-quiet
+Only errors on standard error.
+.TP
+.BR \-v ", " \-\-verbose
+More messages on standard error.
+.RE
+.TP
+.B mark
+Start a new phase in the running recording (through the control FIFO of the capture directory).
+Without \fITEXT\fR the phase is called "mark N".
+.RS
+.TP
+.BR \-d ", " \-\-dir " \fIDIR\fR"
+Capture directory (default: the newest \fI./atl\-doctor\-*\fR).
+.RE
+.TP
+.B report
+Report from a capture directory; with a second directory (an Android capture) ATL against Android, phases and
+steps paired by name and number. With \fB\-\-log\fR a log file is evaluated instead.
+.RS
+.TP
+.BR \-f ", " \-\-format " \fItext\fR|\fIjson\fR|\fIhtml\fR"
+Output format (default: text). \fBhtml\fR needs \fB\-o\fR.
+.TP
+.BR \-o ", " \-\-output " \fIFILE\fR"
+Write to \fIFILE\fR instead of standard output.
+.TP
+.BI \-\-fail\-on " CLASS" [, CLASS ]
+Exit with status 4 if a finding of one of these classes exists.
+Classes: crash, missing, exception\-atl\-only, stub\-result\-used, tree\-visible, memory\-growth, jank, other.
+.TP
+.BI \-\-log " FILE"
+Log mode: one log file per phase (repeatable).
+.TP
+.BI \-\-atl\-src " DIR"
+ATL source tree; matches logged stub messages against its stub list (default: $ATL_DOCTOR_ATL_SRC).
+.TP
+.BI \-\-aosp " DIR"
+AOSP source tree (root or frameworks/base) to compare stubs and missing methods with (default: $ATL_DOCTOR_AOSP).
+.TP
+.BI \-\-density " D"
+Android display density for the tree comparison (default: from the Android capture).
+.RE
+.TP
+.B diff
+Compare two JSON reports: each finding ID is new, gone, changed or unchanged.
+.RS
+.TP
+.BR \-f ", " \-\-format " \fItext\fR|\fIjson\fR"
+Output format (default: text).
+.TP
+.BI \-\-fail\-on " new" | CLASS [, CLASS ]
+Exit with status 4 if there are new findings (\fBnew\fR) or new findings of these classes.
+.RE
+.TP
+.B explain
+Everything known about one finding: occurrences, stack, details, AOSP comparison, images.
+\fIID\fR is a full ID, a short ID or a unique prefix of one.
+.RS
+.TP
+.BR \-d ", " \-\-dir " \fIDIR\fR"
+Capture directory or JSON report (required).
+.TP
+.BI \-\-aosp " DIR"
+AOSP source tree (default: $ATL_DOCTOR_AOSP).
+.RE
+.TP
+.B check
+Check the environment and say, per probe, whether it is available, why not, and how to add it.
+.RS
+.TP
+.BI \-\-prefix " DIR"
+ATL installation prefix (default: $ATL_DOCTOR_PREFIX).
+.TP
+.BI \-\-atl\-src " DIR"
+ATL source tree (default: $ATL_DOCTOR_ATL_SRC).
+.TP
+.BI \-\-aosp " DIR"
+AOSP source tree (default: $ATL_DOCTOR_AOSP).
+.TP
+.B \-\-android
+Also check adb and the Android device.
+.RE
+.TP
+.B scan
+Static coverage of one or more APKs against ATL, without starting them.
+Exit status 1 if an APK had to be skipped.
+.RS
+.TP
+.BR \-f ", " \-\-format " \fItext\fR"
+Output format.
+.TP
+.BR \-o ", " \-\-output " \fIFILE\fR"
+Write to \fIFILE\fR instead of standard output.
+.TP
+.BI \-\-atl\-src " DIR"
+ATL source tree (default: $ATL_DOCTOR_ATL_SRC).
+.TP
+.BI \-\-prefix " DIR"
+ATL installation prefix (default: $ATL_DOCTOR_PREFIX).
+.TP
+.BI \-\-compare\-src " DIR"
+Second ATL source tree (with build*/api\-impl.jar) to compare.
+.TP
+.BI \-\-aosp " DIR"
+AOSP source tree (root or frameworks/base) to compare stubs and missing methods with (default: $ATL_DOCTOR_AOSP).
+.TP
+.BI \-\-sdk\-int " N"
+SDK_INT that ATL reports (default: the app's minSdk, at least 9).
+.RE
+.SH STEP FILES
+One command per line or separated by semicolons; \fB#\fR starts a comment outside quotes.
+.PP
+.nf
+wait\-window "Title" [TIMEOUT]
+click "Text" | click id/NAME | click X,Y     (dp, relative to android:id/content)
+key NAME[+NAME]       type "text"       scroll N
+wait SECONDS          wait\-idle [TIMEOUT]
+mark ["name"]         screenshot "name"
+repeat N { ... }      (also over several lines, nested)
+.fi
+.PP
+The same file runs under ATL and on Android, so the two recordings can be compared step by step.
+Error messages carry file name and line number.
+.SH ENVIRONMENT
+.TP
+.B ATL_DOCTOR_PREFIX
+ATL installation prefix; replaced by \fB\-\-prefix\fR.
+.TP
+.B ATL_DOCTOR_ATL_SRC
+ATL source tree; replaced by \fB\-\-atl\-src\fR.
+.TP
+.B ATL_DOCTOR_AOSP
+AOSP source tree; replaced by \fB\-\-aosp\fR.
+.TP
+.B ATL_DOCTOR_AGENT
+JVMTI agent library; replaced by \fB\-\-agent\fR.
+.PP
+Options win over environment variables. There is no configuration file.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Error (unreadable input, a step failed, ...).
+.TP
+.B 2
+Usage error.
+.TP
+.B 3
+A prerequisite that was asked for explicitly is missing (for example \fB\-\-android\fR without a device).
+.TP
+.B 4
+.B report
+or
+.B diff
+found findings of a class requested with \fB\-\-fail\-on\fR.
+.SH FILES
+A capture directory holds:
+.TP
+.I manifest.json
+Format version, APK, command line, probes, start and end.
+.TP
+.I marks.tsv
+Phase marks (index, boot time, wall time, name).
+.TP
+.I agent.tsv
+JVMTI agent events: exceptions, frame times, hangs, garbage collections, heap.
+.TP
+.I atl.log
+The app's log lines.
+.TP
+.I trace/
+Method trace counters and the stub list.
+.TP
+.I trees/
+View trees, one per mark.
+.TP
+.I shots/
+Screenshots, one per mark.
+.TP
+.I steps.log
+.TQ
+.I steps.tsv
+The steps that ran, and the figures per step.
+.TP
+.I memory.tsv
+Memory per phase.
+.PP
+Reports are written to standard output or to the file named by \fB\-o\fR.
+.SH SEE ALSO
+.BR adb (1),
+.BR kwin_wayland (1)
+.PP
+Android Translation Layer: https://gitlab.com/android_translation_layer/android_translation_layer
+.SH AUTHORS
+Jimbambuli. License: GPL\-3.0\-or\-later.

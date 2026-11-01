@@ -39,3 +39,5 @@ else
     message('atl-doctor-input skipped: needs wayland-client, xkbcommon and wayland-scanner')
   endif
 endif
+
+install_man(files('../doc/atl-doctor.1'))

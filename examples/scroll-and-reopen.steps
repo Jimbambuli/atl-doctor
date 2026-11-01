@@ -1,0 +1,19 @@
+# Scroll a page down and up again, then open and close the tab overview several times.
+# The Steps section of the report gives frames and scroll distance per step (ATL next to Android);
+# the repeated mark "Overview" shows whether memory grows with each round.
+#
+#   atl-doctor record --headless --heap --steps examples/scroll-and-reopen.steps -o atl-run app.apk
+wait-window acr.browser.lightning 60
+wait-idle 15
+mark "Start page"
+scroll 5
+scroll 5
+scroll -10
+mark "Scrolled"
+repeat 5 {
+    click id/tab_count_view
+    wait-idle 5
+    mark "Overview"
+    key Escape
+    wait-idle 5
+}

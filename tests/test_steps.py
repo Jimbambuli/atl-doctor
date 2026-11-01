@@ -143,3 +143,12 @@ def test_atl_driver_maps_tree_to_screen(tmp_path, monkeypatch):
     assert pos == (200.0, 310.0)
     d.click(*pos)                       # surface origin -14,-12 + GTK centre 210,330
     assert sent == ["click 5 5", "click 196 318"]
+
+
+def test_example_step_files_parse():
+    from pathlib import Path
+
+    files = sorted((Path(__file__).parent.parent / "examples").glob("*.steps"))
+    assert files
+    for f in files:
+        assert parse_steps(f.read_text(encoding="utf-8"), f.name)

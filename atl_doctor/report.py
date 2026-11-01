@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from .env import resolve
 from .errors import DoctorError, UsageError
 from .findings import FIX_FIRST_MAX, Finding, Klass, rank
 
@@ -68,6 +68,35 @@ def _environment_lines(r: Report) -> list[str]:
     return lines
 
 
+def _coverage_lines(r: Report, state: str) -> list[str]:
+    lines = []
+    for a in r.extras.get("apps", {}).get(state, []):
+        lines.append(
+            f"{a['package']}  {a['coverage_pct']:.1f}%  {a['coverage_incl_stub_pct']:.1f}%  stubs {a['stub']}  "
+            f"missing {a['missing_member'] + a['missing_class']}  target {a['target_sdk'] or '-'}/sdk_int {a['sdk_int']}"
+            + (f"  [{'; '.join(a['exclusions'])}]" if a["exclusions"] else ""))
+    return lines
+
+
+def _coverage_sections(r: Report) -> list[tuple[str, list[str]]]:
+    out: list[tuple[str, list[str]]] = []
+    states = list(r.extras.get("apps", {}))
+    head = "package  coverage  incl. stubs  stubs  missing  target/sdk_int  exclusions"
+    for st in states:
+        lines = _coverage_lines(r, st)
+        if lines:
+            out.append((f"Coverage ({st})" if len(states) > 1 else "Coverage", [head] + lines))
+    return out
+
+
+def _notes(r: Report) -> list[str]:
+    extra = [f"skipped: {s['apk']} ({s['reason']})" for s in r.extras.get("skipped", [])]
+    hist = r.extras.get("target_sdk_histogram", {})
+    if hist:
+        extra.append("target SDK: " + ", ".join(f"{k}: {v}" for k, v in hist.items()))
+    return extra + r.extras.get("limits", [])
+
+
 def render_text(r: Report) -> str:
     ranked = rank(r.findings)
     out: list[str] = []
@@ -81,6 +110,9 @@ def render_text(r: Report) -> str:
     for title, pred in SECTIONS:
         if title == "Environment":
             section(title, _environment_lines(r))
+            if r.mode == "scan":
+                for t, lines in _coverage_sections(r):
+                    section(t, lines)
         elif title == "Fix first":
             top = [f for f in ranked if f.klass is not Klass.OTHER][:FIX_FIRST_MAX]
             section(title, [ln for f in top for ln in finding_lines(f)])
@@ -94,6 +126,7 @@ def render_text(r: Report) -> str:
             section(title, lines)
         else:
             section(title, [ln for f in ranked if pred(f) for ln in finding_lines(f)])
+    section("Notes", _notes(r))
     return "\n".join(out)
 
 
@@ -110,7 +143,7 @@ def _run_report(args: argparse.Namespace) -> int:
 
     res = parse_logs([Path(p) for p in args.log])
     findings = res.findings
-    atl_src = args.atl_src or os.environ.get("ATL_DOCTOR_ATL_SRC")
+    atl_src = resolve(args.atl_src, "ATL_DOCTOR_ATL_SRC")
     if atl_src:
         from .sources.stubs import build_stub_list, match_log_stubs
 

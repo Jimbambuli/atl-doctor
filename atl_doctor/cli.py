@@ -33,12 +33,13 @@ class _Parser(argparse.ArgumentParser):
 
 def build_parser() -> argparse.ArgumentParser:
     from . import report
+    from .sources import scan
 
     parser = _Parser(prog="atl-doctor", description="Diagnose why an Android app does not run correctly under ATL.",
                      parents=[common_parser()])
     parser.add_argument("--version", action="version", version=f"atl-doctor {__version__}")
     sub = parser.add_subparsers(dest="command", parser_class=_Parser, metavar="COMMAND")
-    for mod in (report,):
+    for mod in (report, scan):
         mod.register(sub)
     return parser
 

@@ -10,6 +10,7 @@ exist on Android; they are counted, never reported as missing.
 from __future__ import annotations
 
 import os
+import threading
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -25,6 +26,7 @@ ENVIRONMENT_IDS = ("android:id/statusBarBackground", "android:id/navigationBarBa
 SIZE_MIN_FRACTION = 0.2  # a size difference also has to exceed 20 % of the Android size
 # request file name of the existing ATLViewDump patch; one place, so an upstream name is easy to follow
 VIEWDUMP_REQUEST = "anfrage"
+_REQUEST_LOCK = threading.Lock()
 
 Rect = tuple[float, float, float, float]
 
@@ -363,7 +365,11 @@ def find_node(nodes: list[Node], selector: str) -> Node | None:
 
 def request_atl_tree(trees_dir: Path, name: str, timeout_s: float = 10.0) -> Path | None:
     """Ask the ATLViewDump hook for a dump into trees_dir/NAME.xml; None if none arrives in time."""
-    trees_dir = Path(trees_dir)
+    with _REQUEST_LOCK:  # one request file: a mark's tree and a step's lookup must not overwrite each other
+        return _request(Path(trees_dir), name, timeout_s)
+
+
+def _request(trees_dir: Path, name: str, timeout_s: float) -> Path | None:
     out = trees_dir / f"{name}.xml"
     req = trees_dir / VIEWDUMP_REQUEST
     out.unlink(missing_ok=True)

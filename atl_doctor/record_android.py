@@ -16,7 +16,7 @@ from pathlib import Path
 from .capture import AGENT, ATL_LOG, CONTROL, MARKS, TREES, Capture, Mark
 from .env import Probe, adb_device, find_helper, probe_all
 from .errors import DoctorError, PrerequisiteMissing
-from .record_atl import RecordOptions, _handle_control, _Stop, _warn, default_out_dir, tree_name
+from .record_atl import RecordOptions, _handle_control, drain_control, _start_steps, _Stop, _warn, default_out_dir, tree_name
 
 DEVICE_DIR = "/data/local/tmp/atl-doctor"
 DEVICE_TREE = "/sdcard/atl-doctor.xml"
@@ -127,6 +127,13 @@ def record_android(opts: RecordOptions) -> int:
     if serial is None:
         raise PrerequisiteMissing("--android needs a device: no device attached (check `adb devices`)")
     adb = Adb(serial)
+    steps = None
+    if opts.steps:
+        from .steps import parse_steps
+        try:
+            steps = parse_steps(opts.steps.read_text(encoding="utf-8"), str(opts.steps))
+        except OSError as e:
+            raise DoctorError(f"cannot read {opts.steps}: {e.strerror}") from e
     info = read_apk(opts.apk)
     if not info.package:
         raise DoctorError(f"{opts.apk}: no package name in the manifest")
@@ -177,6 +184,14 @@ def record_android(opts: RecordOptions) -> int:
     keep = os.open(cap.path(CONTROL), os.O_WRONLY)
     adb.run("logcat", "-c")
     pids: set[str] = set()
+    steps_state: dict = {}
+
+    def on_mark(mk: Mark) -> None:
+        if lib:  # the agent watches this file (memory per phase)
+            line = f"{mk.index}\t{mk.boot_us}\t{mk.wall_us}\t{mk.name}"
+            adb.shell(f"printf '%s\\n' {shlex.quote(line)} >> /data/data/{pkg}/atl-doctor-marks.tsv")
+        _tree(adb, cap, mk)
+
     stop = _Stop()
     try:
         with stop, open(cap.path(LOGCAT_RAW), "wb") as raw:
@@ -185,8 +200,12 @@ def record_android(opts: RecordOptions) -> int:
             try:
                 adb.run(*m.command[3:])
                 started = time.monotonic()
+                if steps is not None:
+                    from .steps import AndroidDriver
+                    steps_state = _start_steps(cap, AndroidDriver(serial, cap, pkg, density or 1.0), steps,
+                                               str(opts.steps))
                 buf, last_poll, armed = bytearray(), 0.0, False
-                while stop.by is None:
+                while stop.by is None and not steps_state.get("done"):
                     now = time.monotonic()
                     if now - last_poll >= POLL_S:
                         last_poll = now
@@ -206,13 +225,13 @@ def record_android(opts: RecordOptions) -> int:
                             data = os.read(ctl, 4096)
                         except BlockingIOError:
                             continue
-                        for mk in _handle_control(cap, data, buf, lambda: adb.boot_us()):
-                            if lib:
-                                line = f"{mk.index}\t{mk.boot_us}\t{mk.wall_us}\t{mk.name}"
-                                adb.shell(f"printf '%s\\n' {shlex.quote(line)} >> /data/data/{pkg}/atl-doctor-marks.tsv")
-                            _tree(adb, cap, mk)
+                        for mk in _handle_control(cap, data, buf, adb.boot_us):
+                            on_mark(mk)
+                for mk in drain_control(cap, ctl, buf, adb.boot_us):  # a mark sent by the last step
+                    on_mark(mk)
                 if stop.by is not None:
                     _warn(f"{stop.by}: stopping the app")
+                if stop.by is not None or steps_state.get("done"):
                     adb.shell("am", "force-stop", pkg)
             finally:
                 logcat.terminate()
@@ -234,7 +253,11 @@ def record_android(opts: RecordOptions) -> int:
     m.ended = datetime.now(timezone.utc).isoformat(timespec="seconds")
     if stop.by is not None:
         m.environment["stopped_by"] = stop.by
+    elif steps_state.get("done"):
+        m.environment["stopped_by"] = "steps"
     m.environment["pids"] = " ".join(sorted(pids))
     cap.write_manifest(m)
     _warn(f"done: {out}")
+    if steps_state.get("error"):
+        raise steps_state["error"]
     return 0

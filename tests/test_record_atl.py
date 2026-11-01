@@ -202,3 +202,81 @@ def test_report_without_apk_notes_it(tmp_path, capsys):
     c.write_manifest(m)
     assert main(["report", str(c.root)]) == 0
     assert "stub results not checked" in capsys.readouterr().out
+
+
+class _FakeSession:
+    started = stopped = False
+
+    def __init__(self, run_dir):
+        self.run_dir = run_dir
+
+    def start(self, width=1400, height=900):
+        _FakeSession.started = True
+
+    def env(self):
+        return {"WAYLAND_DISPLAY": "wayland-fake"}
+
+    def stop(self):
+        _FakeSession.stopped = True
+
+
+def _fake_steps(monkeypatch):
+    import atl_doctor.record_atl as ra
+    from test_steps import FakeDriver
+
+    drivers = []
+
+    def make(cap, session, opts, package):
+        d = FakeDriver(has_tree=False)
+        d.mark = lambda name: ra.send_mark(cap.root, name)
+        d.close = lambda: None
+        drivers.append(d)
+        return d
+
+    _FakeSession.started = _FakeSession.stopped = False
+    monkeypatch.setattr(ra, "HeadlessSession", _FakeSession)
+    monkeypatch.setattr(ra, "make_atl_driver", make)
+    return drivers
+
+
+def test_steps_run_and_end_recording(tmp_prefix, apk, tmp_path, monkeypatch, capsys):
+    drivers = _fake_steps(monkeypatch)
+    steps = tmp_path / "s.steps"
+    steps.write_text('wait-window "Demo"\nmark "Open"\nclick 10,20\nkey Escape\n')
+    c = tmp_path / "c"
+    assert main(["record", "--steps", str(steps), "-o", str(c), "--prefix", str(tmp_prefix), str(apk), "--", "--wait"]) == 0
+    assert "--steps implies --headless" in capsys.readouterr().err
+    m = Capture.open(c).read_manifest()
+    assert m.ended and m.environment["stopped_by"] == "steps"
+    assert [k.name for k in Capture(c).read_marks()] == ["start", "Open"]
+    assert ("click", 10.0, 20.0) in drivers[0].calls
+    assert len((c / "steps.log").read_text().splitlines()) == 4
+    assert _FakeSession.started and _FakeSession.stopped
+    assert "-w" in m.command and "1333" in m.command and "WAYLAND_DISPLAY" not in m.environment
+
+
+def test_step_failure_ends_recording_exit_1(tmp_prefix, apk, tmp_path, monkeypatch, capsys):
+    _fake_steps(monkeypatch)
+    steps = tmp_path / "s.steps"
+    steps.write_text('wait 0\nwait-window never 0.2\nkey Escape\n')
+    c = tmp_path / "c"
+    assert main(["record", "--steps", str(steps), "-o", str(c), "--prefix", str(tmp_prefix), str(apk), "--", "--wait"]) == 1
+    assert f"{steps}:2: no window matching 'never' within 0.2 s" in capsys.readouterr().err
+    m = Capture.open(c).read_manifest()
+    assert m.ended and m.environment["stopped_by"] == "steps"
+
+
+def test_steps_syntax_error_before_recording(tmp_prefix, apk, tmp_path, capsys):
+    steps = tmp_path / "s.steps"
+    steps.write_text('frobnicate\n')
+    assert main(["record", "--steps", str(steps), "-o", str(tmp_path / "c"), "--prefix", str(tmp_prefix), str(apk)]) == 1
+    assert f"{steps}:1: unknown command 'frobnicate'" in capsys.readouterr().err
+    assert not (tmp_path / "c").exists()
+
+
+def test_steps_without_input_helper_exit_3(tmp_prefix, apk, tmp_path, monkeypatch):
+    import atl_doctor.record_atl as ra
+    monkeypatch.setattr(ra, "HeadlessSession", _FakeSession)
+    steps = tmp_path / "s.steps"
+    steps.write_text('key Escape\n')
+    assert main(["record", "--steps", str(steps), "-o", str(tmp_path / "c"), "--prefix", str(tmp_prefix), str(apk)]) == 3

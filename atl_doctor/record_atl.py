@@ -16,12 +16,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from .capture import AGENT, ATL_LOG, CONTROL, MARKS, TRACE_DIR, TREES, Capture, Mark
-from .env import AGENT_LIB, TRACECOUNT, Probe, find_helper, has_viewdump, jvmti_plugin, probe_all, resolve
+from .capture import AGENT, ATL_LOG, CONTROL, MARKS, STEPS_LOG, TRACE_DIR, TREES, Capture, Mark
+from .env import AGENT_LIB, INPUT_HELPER, TRACECOUNT, Probe, find_helper, has_viewdump, jvmti_plugin, probe_all, resolve
 from .errors import DoctorError, PrerequisiteMissing
+from .headless import APP_HEIGHT, APP_WIDTH, HeadlessSession
 from .sources.trace import write_watch_file
 
 ARM_FILE = "armed"
+RUN_DIR = "run"  # private KWin session: socket, D-Bus address, logs, input helper FIFO
 ARM_AFTER_S = 5.0
 STOP_GRACE_S = 10.0
 TRACE_FILE = "trace.bin"
@@ -127,6 +129,19 @@ def _handle_control(cap: Capture, data: bytes, buf: bytearray,
     return new
 
 
+def drain_control(cap: Capture, ctl: int, buf: bytearray, clock: Callable[[], int | None] | None = None) -> list[Mark]:
+    """Whatever is still in the control FIFO."""
+    new: list[Mark] = []
+    while True:
+        try:
+            data = os.read(ctl, 4096)
+        except BlockingIOError:
+            return new
+        if not data:
+            return new
+        new += _handle_control(cap, data, buf, clock)
+
+
 def tree_name(mark: Mark) -> str:
     """trees/NN-name.xml: mark index and a file-name-safe form of its name."""
     return f"{mark.index:02d}-" + (re.sub(r"[^A-Za-z0-9._-]+", "-", mark.name).strip("-") or "mark")
@@ -143,12 +158,74 @@ def _request_tree(cap: Capture, mark: Mark) -> None:
     threading.Thread(target=run, daemon=True).start()
 
 
+def make_atl_driver(cap: Capture, session: HeadlessSession, opts: RecordOptions, package: str | None):
+    """Start the input helper inside the session and return the step driver for ATL."""
+    from .steps import AtlDriver
+
+    helper = find_helper(INPUT_HELPER, None, opts.prefix)
+    run = cap.path(RUN_DIR)
+    fifo, status = run / "input", run / "input.status"
+    os.mkfifo(fifo)
+    with open(run / "input.log", "wb") as log:
+        proc = subprocess.Popen([str(helper), "serve", str(fifo), str(status)], env={**os.environ, **session.env()},
+                                stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    d = AtlDriver(cap, session, fifo, status, has_viewdump(opts.prefix), frames=False, package=package)
+    close = d.close
+
+    def close_all() -> None:
+        close()
+        try:
+            proc.wait(5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+    d.close = close_all  # type: ignore[method-assign]
+    return d
+
+
+_make_atl_driver = make_atl_driver  # tests replace make_atl_driver; the helper check applies to the real one
+
+
+def _start_steps(cap: Capture, driver, steps: list, filename: str) -> dict:
+    """Run the steps in a thread; result["done"] when finished, result["error"] on failure."""
+    from .steps import run_steps
+
+    result: dict = {}
+
+    def run() -> None:
+        try:
+            with open(cap.path(STEPS_LOG), "w", encoding="utf-8") as log:
+                run_steps(steps, driver, filename, log)
+        except DoctorError as e:
+            result["error"] = e
+        except Exception as e:  # noqa: BLE001 - the recording must still end cleanly
+            result["error"] = DoctorError(f"step runner failed: {e!r}")
+        finally:
+            result["done"] = True
+
+    threading.Thread(target=run, daemon=True).start()
+    return result
+
+
 def record_atl(opts: RecordOptions) -> int:
     from .sources.dex import read_apk
+    from .steps import parse_steps
 
     atl = opts.prefix / "bin/android-translation-layer"
     if not atl.is_file():
         raise PrerequisiteMissing(f"{atl} not found (pass the ATL installation prefix with --prefix)")
+    steps = None
+    if opts.steps:
+        try:
+            steps = parse_steps(opts.steps.read_text(encoding="utf-8"), str(opts.steps))
+        except OSError as e:
+            raise DoctorError(f"cannot read {opts.steps}: {e.strerror}") from e
+        if not opts.headless:
+            _warn("--steps implies --headless")
+            opts.headless = True
+        if make_atl_driver is _make_atl_driver and find_helper(INPUT_HELPER, None, opts.prefix) is None:
+            raise PrerequisiteMissing("--steps needs the input helper atl-doctor-input (build the C helpers)")
     info = read_apk(opts.apk)
     opts.apk = opts.apk.resolve()
     out = (opts.out or default_out_dir(datetime.now())).resolve()
@@ -177,6 +254,8 @@ def record_atl(opts: RecordOptions) -> int:
         save_stub_tsv(entries, trace_dir / STUBS_TSV)
     write_watch_file(entries, watch)
 
+    if opts.headless and not any(a in ("-w", "--width") for a in opts.atl_args):
+        opts.atl_args = ["-w", str(APP_WIDTH), "-h", str(APP_HEIGHT), *opts.atl_args]
     # without the counter nobody would consume the streamed trace: no trace then (it would grow without bound)
     cmd, extra_env = build_command(opts, cap, plugin, agent, trace=counter is not None)
     trees = "ATL_VIEWDUMP" in extra_env
@@ -189,6 +268,17 @@ def record_atl(opts: RecordOptions) -> int:
     m.environment = {"prefix": str(opts.prefix), **({"atl_src": str(opts.atl_src)} if opts.atl_src else {})}
     cap.write_manifest(m)
 
+    session = driver = None
+    steps_state: dict = {}
+    if opts.headless:
+        session = HeadlessSession(cap.path(RUN_DIR))
+        try:
+            session.start()
+        except DoctorError:
+            m.ended = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            m.environment["stopped_by"] = "headless session failed"
+            cap.write_manifest(m)
+            raise
     os.mkfifo(cap.path(CONTROL))
     ctl = os.open(cap.path(CONTROL), os.O_RDONLY | os.O_NONBLOCK)
     keep = os.open(cap.path(CONTROL), os.O_WRONLY)  # own writer: no EOF while no `mark` is connected
@@ -199,33 +289,55 @@ def record_atl(opts: RecordOptions) -> int:
                 [str(counter), str(trace_dir / TRACE_FILE), str(cap.path(MARKS)), str(trace_dir / TRACE_PREFIX),
                  str(watch), (info.package or "") + "."], stdout=subprocess.DEVNULL, stderr=clog)
     stop = _Stop()
-    with stop, open(cap.path(ATL_LOG), "wb", buffering=0) as logf:
-        proc = subprocess.Popen(cmd, env={**os.environ, **extra_env}, stdin=subprocess.DEVNULL, stdout=logf,
-                                stderr=subprocess.STDOUT, start_new_session=True)
-        m.environment["atl_pid"] = str(proc.pid)
-        cap.write_manifest(m)
-        started, buf = time.monotonic(), bytearray()
-        while proc.poll() is None and stop.by is None:
-            if not cap.path(ARM_FILE).exists() and time.monotonic() - started >= ARM_AFTER_S:
-                cap.path(ARM_FILE).touch()
-            try:
-                ready, _, _ = select.select([ctl], [], [], 0.2)
-            except InterruptedError:
-                continue
-            if ready:
-                try:
-                    for mk in _handle_control(cap, os.read(ctl, 4096), buf):
-                        if trees:
-                            _request_tree(cap, mk)
-                except BlockingIOError:
-                    pass
-        if stop.by is not None:
-            _warn(f"{stop.by}: stopping ATL")
-            _stop_group(proc)
-        rc = proc.wait()
+    try:
+        with stop, open(cap.path(ATL_LOG), "wb", buffering=0) as logf:
+            run_env = {**os.environ, **(session.env() if session else {}), **extra_env}
+            proc = subprocess.Popen(cmd, env=run_env, stdin=subprocess.DEVNULL, stdout=logf,
+                                    stderr=subprocess.STDOUT, start_new_session=True)
+            m.environment["atl_pid"] = str(proc.pid)
+            cap.write_manifest(m)
+            if steps is not None:
+                driver = make_atl_driver(cap, session, opts, info.package)
+                steps_state = _start_steps(cap, driver, steps, str(opts.steps))
+            rc = _record_loop(cap, proc, stop, ctl, trees, steps_state)
+    finally:
+        if driver is not None:
+            driver.close()
+        if session is not None:
+            session.stop()
     os.close(keep)
     os.close(ctl)
+    return _finish(cap, m, rc, stop, steps_state, count_proc, trace_dir, out)
 
+
+def _record_loop(cap: Capture, proc: subprocess.Popen, stop: _Stop, ctl: int, trees: bool, steps_state: dict) -> int:
+    """Until ATL ends, SIGINT/SIGTERM or the steps are done; serves the control FIFO meanwhile."""
+    started, buf = time.monotonic(), bytearray()
+    while proc.poll() is None and stop.by is None and not steps_state.get("done"):
+        if not cap.path(ARM_FILE).exists() and time.monotonic() - started >= ARM_AFTER_S:
+            cap.path(ARM_FILE).touch()
+        try:
+            ready, _, _ = select.select([ctl], [], [], 0.2)
+        except InterruptedError:
+            continue
+        if ready:
+            try:
+                for mk in _handle_control(cap, os.read(ctl, 4096), buf):
+                    if trees:
+                        _request_tree(cap, mk)
+            except BlockingIOError:
+                pass
+    for mk in drain_control(cap, ctl, buf):  # a mark sent by the last step
+        if trees:
+            _request_tree(cap, mk)
+    if stop.by is not None:
+        _warn(f"{stop.by}: stopping ATL")
+    if stop.by is not None or (steps_state.get("done") and proc.poll() is None):
+        _stop_group(proc)
+    return proc.wait()
+
+
+def _finish(cap: Capture, m, rc: int, stop: _Stop, steps_state: dict, count_proc, trace_dir: Path, out: Path) -> int:
     if count_proc:
         (trace_dir / (TRACE_PREFIX + ".stop")).touch()
         try:
@@ -239,12 +351,16 @@ def record_atl(opts: RecordOptions) -> int:
     m.ended = datetime.now(timezone.utc).isoformat(timespec="seconds")
     if stop.by is not None:
         m.environment["stopped_by"] = stop.by  # ended on request: not a crash
+    elif steps_state.get("done") and rc in (0, -signal.SIGTERM, -signal.SIGKILL):
+        m.environment["stopped_by"] = "steps"  # ATL was ended after the last step
     elif rc < 0:
         m.signal = _signal_name(rc)
     else:
         m.exit_status = rc
     cap.write_manifest(m)
     _warn(f"done: {out}")
+    if steps_state.get("error"):
+        raise steps_state["error"]
     return 0
 
 
@@ -284,12 +400,13 @@ def _run_record(args: argparse.Namespace) -> int:
 
         return record_android(RecordOptions(apk=Path(args.apk), out=Path(args.output) if args.output else None,
                                             prefix=Path(prefix) if prefix else None, atl_src=None, agent=None,
-                                            android=True))
+                                            steps=Path(args.steps) if args.steps else None, android=True))
     if not prefix:
         raise PrerequisiteMissing("no ATL prefix (pass --prefix DIR or set ATL_DOCTOR_PREFIX)")
     atl_src = resolve(args.atl_src, "ATL_DOCTOR_ATL_SRC")
     opts = RecordOptions(apk=Path(args.apk), out=Path(args.output) if args.output else None, prefix=Path(prefix),
                          atl_src=Path(atl_src) if atl_src else None, agent=Path(args.agent) if args.agent else None,
+                         headless=args.headless, steps=Path(args.steps) if args.steps else None,
                          atl_args=list(args.atl_args))
     return record_atl(opts)
 
@@ -306,6 +423,9 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--prefix", metavar="DIR", help="ATL installation prefix (default: $ATL_DOCTOR_PREFIX)")
     p.add_argument("--atl-src", metavar="DIR", help="ATL source tree for the stub list (default: $ATL_DOCTOR_ATL_SRC)")
     p.add_argument("--agent", metavar="PATH", help="JVMTI agent library (default: $ATL_DOCTOR_AGENT, then the helper dirs)")
+    p.add_argument("--headless", action="store_true",
+                   help="run ATL in a private invisible KWin session (kwin_wayland --virtual)")
+    p.add_argument("--steps", metavar="FILE", help="drive the app with a step file; implies --headless under ATL")
     p.add_argument("--android", action="store_true",
                    help="record the same app on an Android device over adb (own capture directory)")
     p.add_argument("apk", metavar="APK")

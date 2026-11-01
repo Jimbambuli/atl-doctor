@@ -124,3 +124,31 @@ def test_request_atl_tree_answered(tmp_path):
     p = request_atl_tree(tmp_path, "01-Main", timeout_s=5)
     th.join()
     assert p == tmp_path / "01-Main.xml"
+
+
+def test_request_atl_tree_serialised(tmp_path):
+    """Two requests at once (a mark and a step) must both be answered."""
+    stop = threading.Event()
+
+    def hook():
+        req = tmp_path / VIEWDUMP_REQUEST
+        while not stop.is_set():
+            if req.exists():
+                time.sleep(0.1)  # the hook polls; a second writer would replace the name meanwhile
+                name = req.read_text().strip()
+                (tmp_path / f"{name}.xml").write_text("<hierarchy/>")
+                req.unlink()
+            time.sleep(0.01)
+
+    h = threading.Thread(target=hook)
+    h.start()
+    res = {}
+    ts = [threading.Thread(target=lambda n=n: res.setdefault(n, request_atl_tree(tmp_path, n, timeout_s=5)))
+          for n in ("01-Main", "step-001")]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    stop.set()
+    h.join()
+    assert res["01-Main"] and res["step-001"]

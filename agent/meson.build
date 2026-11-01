@@ -21,4 +21,21 @@ else
                 include_directories: jni_inc, dependencies: agent_deps, install: true, install_dir: helper_dir)
   executable('atl-doctor-tracecount', 'atl_doctor_tracecount.c', install: true, install_dir: helper_dir)
   install_data('android-wrap.sh', install_dir: helper_dir)
+
+  # input helper for --headless/--steps: optional, needs wayland-client, xkbcommon and wayland-scanner
+  wl_client = dependency('wayland-client', required: false)
+  xkb = dependency('xkbcommon', required: false)
+  scanner = find_program('wayland-scanner', required: false)
+  if wl_client.found() and xkb.found() and scanner.found()
+    fake_input = [
+      custom_target('fake-input-client-protocol.h', input: 'fake-input.xml', output: 'fake-input-client-protocol.h',
+                    command: [scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+      custom_target('fake-input-protocol.c', input: 'fake-input.xml', output: 'fake-input-protocol.c',
+                    command: [scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+    ]
+    executable('atl-doctor-input', 'atl_doctor_input.c', fake_input, dependencies: [wl_client, xkb],
+               install: true, install_dir: helper_dir)
+  else
+    message('atl-doctor-input skipped: needs wayland-client, xkbcommon and wayland-scanner')
+  endif
 endif

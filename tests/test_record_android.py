@@ -198,3 +198,26 @@ def test_report_second_dir_must_be_android(tmp_path):
     a = _capture(tmp_path / "atl", "atl", ["Main"], None)
     b = _capture(tmp_path / "atl2", "atl", ["Main"], None)
     assert main(["report", str(a), str(b)]) == 2
+
+
+def test_android_steps(adb, apk, tmp_path):
+    table(adb, root=False)
+    t = json.loads((adb / "table.json").read_text())
+    t["shell dumpsys window"] = ["  mCurrentFocus=Window{1 u0 org.example.demo/org.example.demo.Main}\n", 0]
+    t["shell dumpsys gfxinfo org.example.demo"] = ["Total frames rendered: 12\n", 0]
+    (adb / "table.json").write_text(json.dumps(t))
+    (adb / "device" / "pidof").write_text("1234\n")
+    shutil.copy(TREES / "android-main.xml", adb / "device" / "atl-doctor.xml")
+    steps = tmp_path / "s.steps"
+    steps.write_text('wait-window org.example.demo 5\nclick 10,20\nclick "Save"\nkey Escape\nkey ctrl+a\n'
+                     'wait-idle 5\nmark "M"\n')
+    out = tmp_path / "c"
+    assert main(["record", "--android", "--steps", str(steps), "-o", str(out), str(apk)]) == 0
+    c = calls(adb)
+    assert "shell input tap 20 40" in c
+    assert "shell input tap 400 650" in c            # centre of id/save: (200..600, 600..700) px
+    assert "shell input keyevent KEYCODE_BACK" in c
+    assert "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A" in c
+    assert [k.name for k in Capture(out).read_marks()] == ["start", "M"]
+    assert Capture(out).read_manifest().environment["stopped_by"] == "steps"
+    assert "shell am force-stop org.example.demo" in c[-6:] or c.count("shell am force-stop org.example.demo") >= 2

@@ -147,6 +147,17 @@ def test_pair_report_attaches_crops(tmp_path, capsys):
     assert droid[:2] == (464, 160)
 
 
+def test_each_screenshot_is_decoded_once(tmp_path, capsys, monkeypatch):
+    import atl_doctor.sources.shots as shots
+    a, b = _pair(tmp_path)
+    reads = []
+    real = shots.png_read
+    monkeypatch.setattr(shots, "png_read", lambda p: reads.append(Path(p)) or real(p))
+    assert main(["report", "-f", "json", str(a), str(b)]) == 0
+    crops = [f for f in json.loads(capsys.readouterr().out)["findings"] if "crops" in f["details"]]
+    assert len(crops) > 1 and sorted(reads) == sorted({*reads}) and len(reads) == 2  # not once per finding
+
+
 def test_pair_report_without_shots_has_no_crops(tmp_path, capsys):
     a, b = _pair(tmp_path, with_android_shot=False)
     assert main(["report", "-f", "json", str(a), str(b)]) == 0

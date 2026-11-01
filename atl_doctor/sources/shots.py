@@ -121,8 +121,9 @@ def take_atl_shot(session, png: Path) -> bool:
     return ok
 
 
-def _crop(path: Path, rect_dp: list[float], scale: float, origin: tuple[float, float], out: Path) -> None:
-    w, h, px = png_read(path)
+def _crop(path: Path, rect_dp: list[float], scale: float, origin: tuple[float, float], out: Path,
+          read=None) -> None:
+    w, h, px = (read or png_read)(path)
     m = CROP_MARGIN_DP
     x0 = max(0, min(w, round(origin[0] + (rect_dp[0] - m) * scale)))
     y0 = max(0, min(h, round(origin[1] + (rect_dp[1] - m) * scale)))
@@ -134,7 +135,7 @@ def _crop(path: Path, rect_dp: list[float], scale: float, origin: tuple[float, f
 
 def crop_for_finding(f: Finding, atl_png: Path, android_png: Path, atl_scale: float, android_density: float,
                      out_dir: Path, atl_origin: tuple[float, float] = (0.0, 0.0),
-                     android_origin: tuple[float, float] = (0.0, 0.0)) -> tuple[Path, Path] | None:
+                     android_origin: tuple[float, float] = (0.0, 0.0), read=None) -> tuple[Path, Path] | None:
     """Crop the view's rectangle (plus margin) from both screenshots. A side without a rectangle (the view is
     missing there) is cut at the other side's place. Origins are where dp 0,0 lies in each image, in pixels."""
     atl_r, and_r = f.details.get("atl"), f.details.get("android")
@@ -143,8 +144,8 @@ def crop_for_finding(f: Finding, atl_png: Path, android_png: Path, atl_scale: fl
     out_dir = Path(out_dir)
     a = out_dir / f"{f.short_id}-atl.png"
     b = out_dir / f"{f.short_id}-android.png"
-    _crop(Path(atl_png), atl_r or and_r, atl_scale, atl_origin, a)
-    _crop(Path(android_png), and_r or atl_r, android_density, android_origin, b)
+    _crop(Path(atl_png), atl_r or and_r, atl_scale, atl_origin, a, read)
+    _crop(Path(android_png), and_r or atl_r, android_density, android_origin, b, read)
     f.details["crops"] = {"atl": f"{out_dir.name}/{a.name}", "android": f"{out_dir.name}/{b.name}"}
     return a, b
 
@@ -161,6 +162,13 @@ def attach_crops(findings: list[Finding], atl_cap: Capture, android_cap: Capture
     atl_idx = {i: pairs[k] for k, i in phases_by_name([m.name for m in atl_marks]).items() if k in pairs}
     if density is None:
         density = float(android_cap.read_manifest().environment.get("density") or 1.0)
+    images: dict[Path, tuple[int, int, bytes]] = {}
+
+    def read(path: Path) -> tuple[int, int, bytes]:  # decode each screenshot once, not once per finding
+        if path not in images:
+            images[path] = png_read(path)
+        return images[path]
+
     for f in findings:
         if f.kind != "tree" or not f.occurrences:
             continue
@@ -176,6 +184,6 @@ def attach_crops(findings: list[Finding], atl_cap: Capture, android_cap: Capture
             gx, gy = content_origin(a_xml, "atl")
             sx, sy = read_origin(a_png)
             crop_for_finding(f, a_png, b_png, 1.0, density, atl_cap.root / CROPS, (sx + gx, sy + gy),
-                             content_origin(b_xml, "android"))
+                             content_origin(b_xml, "android"), read)
         except (DoctorError, OSError) as e:
             print(f"atl-doctor: no crop for {f.short_id}: {e}", file=sys.stderr)

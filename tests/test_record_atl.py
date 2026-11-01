@@ -279,6 +279,20 @@ def test_steps_run_and_end_recording(tmp_prefix, apk, tmp_path, monkeypatch, cap
     assert "-w" in m.command and "1333" in m.command and "WAYLAND_DISPLAY" not in m.environment
 
 
+def test_mark_in_last_step_still_gets_its_tree(tmp_prefix, apk, tmp_path, monkeypatch):
+    import atl_doctor.record_atl as ra
+    import atl_doctor.sources.shots as shots
+    _fake_steps(monkeypatch)
+    monkeypatch.setattr(ra, "has_viewdump", lambda prefix: True)
+    monkeypatch.setattr(shots, "take_atl_shot", lambda session, path: True)
+    steps = tmp_path / "s.steps"
+    steps.write_text('wait-window "Demo"\nmark "Last"\n')
+    c = tmp_path / "c"
+    assert main(["record", "--steps", str(steps), "-o", str(c), "--prefix", str(tmp_prefix), str(apk), "--", "--wait",
+                 "--viewdump", "--dump-delay", "1"]) == 0
+    assert (c / "trees/01-Last.xml").is_file()      # ATL is ended only after the pending tree request
+
+
 def test_step_failure_ends_recording_exit_1(tmp_prefix, apk, tmp_path, monkeypatch, capsys):
     _fake_steps(monkeypatch)
     steps = tmp_path / "s.steps"

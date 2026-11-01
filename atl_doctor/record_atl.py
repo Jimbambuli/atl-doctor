@@ -26,6 +26,7 @@ ARM_FILE = "armed"
 HANG_MS = 100     # main thread blocked longer than this is a hang (Spec 6.4)
 RUN_DIR = "run"  # private KWin session: socket, D-Bus address, logs, input helper FIFO
 ARM_AFTER_S = 5.0
+TREE_WAIT_S = 30.0  # tree request (10 s) + screenshot of a mark sent by the last step
 STOP_GRACE_S = 10.0
 TRACE_FILE = "trace.bin"
 TRACE_PREFIX = "tr"
@@ -156,7 +157,7 @@ def tree_name(mark: Mark) -> str:
     return f"{mark.index:02d}-" + (re.sub(r"[^A-Za-z0-9._-]+", "-", mark.name).strip("-") or "mark")
 
 
-def _request_tree(cap: Capture, mark: Mark, session: HeadlessSession | None = None) -> None:
+def _request_tree(cap: Capture, mark: Mark, session: HeadlessSession | None = None) -> threading.Thread:
     """In the background: the control loop must not wait for the app. With a headless session the mark also
     gets a screenshot (shots/NN-name.png)."""
     from .sources.shots import take_atl_shot
@@ -172,7 +173,9 @@ def _request_tree(cap: Capture, mark: Mark, session: HeadlessSession | None = No
             except DoctorError as e:
                 _warn(f"no screenshot for mark {mark.index} ({mark.name}): {e}")
 
-    threading.Thread(target=run, daemon=True).start()
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    return t
 
 
 def make_atl_driver(cap: Capture, session: HeadlessSession, opts: RecordOptions, package: str | None):
@@ -336,6 +339,7 @@ def _record_loop(cap: Capture, proc: subprocess.Popen, stop: _Stop, ctl: int, tr
                  session: HeadlessSession | None = None) -> int:
     """Until ATL ends, SIGINT/SIGTERM or the steps are done; serves the control FIFO meanwhile."""
     started, buf = time.monotonic(), bytearray()
+    pending: list[threading.Thread] = []  # tree/screenshot requests of the marks
     while proc.poll() is None and stop.by is None and not steps_state.get("done"):
         if not cap.path(ARM_FILE).exists() and time.monotonic() - started >= ARM_AFTER_S:
             cap.path(ARM_FILE).touch()
@@ -348,13 +352,16 @@ def _record_loop(cap: Capture, proc: subprocess.Popen, stop: _Stop, ctl: int, tr
                 for mk in _handle_control(cap, os.read(ctl, 4096), buf):
                     _memory(cap, proc.pid, mk.index)
                     if trees:
-                        _request_tree(cap, mk, session)
+                        pending.append(_request_tree(cap, mk, session))
             except BlockingIOError:
                 pass
     for mk in drain_control(cap, ctl, buf):  # a mark sent by the last step
         _memory(cap, proc.pid, mk.index)
         if trees:
-            _request_tree(cap, mk, session)
+            pending.append(_request_tree(cap, mk, session))
+    for t in pending:  # ATL must answer the tree (and pose for the screenshot) before it is ended
+        if proc.poll() is None:
+            t.join(TREE_WAIT_S)
     if proc.poll() is None:
         _memory(cap, proc.pid, "end")
     if stop.by is not None:

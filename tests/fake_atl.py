@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Test double for android-translation-layer.
 
-fake_atl.py APK [--exit-code N] [--signal SIG] [--wait] [--trace] [--viewdump] [-X OPT ...]
+fake_atl.py APK [--exit-code N] [--signal SIG] [--wait] [--trace] [--viewdump] [--dump-delay S] [-X OPT ...]
 Prints a few log lines; --wait runs until SIGTERM; --trace writes a small method trace to the
 -Xmethod-trace-file: path (one app call of Drawable.parseBlendMode); --viewdump answers ATLViewDump requests
 in $ATL_VIEWDUMP while waiting; ends with exit code N or dies by SIG.
@@ -35,6 +35,8 @@ def main() -> None:
             if dump and os.path.exists(os.path.join(dump, "anfrage")):
                 req = os.path.join(dump, "anfrage")
                 name = open(req, encoding="utf-8").read().strip()
+                if "--dump-delay" in opt:
+                    time.sleep(float(args[args.index("--dump-delay") + 1]))
                 with open(os.path.join(dump, name + ".xml"), "w", encoding="utf-8") as f:
                     f.write('<?xml version="1.0"?>\n<hierarchy rotation="0" atl="1"></hierarchy>\n')
                 os.unlink(req)

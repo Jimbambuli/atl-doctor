@@ -311,6 +311,10 @@ static void JNICALL cb_class_prepare(jvmtiEnv *je, JNIEnv *jni, jthread th, jcla
 }
 /* check all classes loaded so far: base classes first (the order of loaded classes is arbitrary) */
 static void arm(JNIEnv *jni) {
+	/* only now: ART walks the stack for every event it dispatches, a class-prepare event for each of the many
+	   thousand classes of a start would slow the app down a lot (JW Library: +80 % start time) */
+	(*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_CLASS_PREPARE, NULL);
+	(*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_BREAKPOINT, NULL);
 	jint n = 0; jclass *ks = NULL;
 	(*J)->GetLoadedClasses(J, &n, &ks);
 	uint8_t old = in_callback; in_callback = 1;
@@ -678,8 +682,6 @@ static jint setup_env(JavaVM *vm) {
 	cb.GarbageCollectionStart = cb_gc_start; cb.GarbageCollectionFinish = cb_gc_finish;
 	(*J)->SetEventCallbacks(J, &cb, sizeof cb);
 	(*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_VM_INIT, NULL);
-	(*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_CLASS_PREPARE, NULL);
-	(*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_BREAKPOINT, NULL);
 	info("loaded%s", "");
 	return JNI_OK;
 }

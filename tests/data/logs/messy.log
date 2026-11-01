@@ -1,0 +1,4 @@
+I/x(1): ok
+[31mE/Foo(1): not implemented[0m
+bad bytes ÿþ here
+E/Foo(1): not implemented

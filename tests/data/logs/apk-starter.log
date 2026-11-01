@@ -1,0 +1,6 @@
+# apk-starter: format=1
+# apk-starter: package=org.example.demo
+# apk-starter: version_name=1.2
+# apk-starter: atl_commit=abc123
+I/ATL(1): hello
+exit=0

@@ -1,0 +1,22 @@
+I/ATL(100): starting demo
+W/AssetManager(123): AssetManager.destroy(): STUB
+E/AndroidRuntime(123): FATAL EXCEPTION: main
+E/AndroidRuntime(123): java.lang.IllegalStateException: bad state 17 at 0x7f3a2c00
+E/AndroidRuntime(123): 	at com.example.Foo.bar(Foo.java:42)
+E/AndroidRuntime(123): 	at com.example.Main.run(Main.java:7)
+java.lang.NoSuchMethodError: No static method createImageThumbnail(Ljava/io/File;Landroid/util/Size;Landroid/os/CancellationSignal;)Landroid/graphics/Bitmap; in class Landroid/media/ThumbnailUtils; or its super classes (declaration of 'android.media.ThumbnailUtils' appears in /x/api-impl.jar)
+	at com.example.Thumbs.load(Thumbs.java:10)
+	at com.example.Main.onCreate(Main.java:20)
+	at android.app.Activity.performCreate(Activity.java:1)
+java.lang.NoSuchFieldError: No static field FLAG_X of type I in class Landroid/view/View;
+	at com.example.A.b(A.java:1)
+java.lang.NoClassDefFoundError: Failed resolution of: Landroidx/missing/Thing;
+	at com.example.C.d(C.java:2)
+java.lang.UnsatisfiedLinkError: No implementation found for void android.graphics.Foo.nativeBar(int) (tried Java_android_graphics_Foo_nativeBar)
+	at android.graphics.Foo.nativeBar(Native Method)
+java.lang.ArrayIndexOutOfBoundsException: Index 17 out of bounds for length 3
+	at com.example.Lists.get$$ExternalSyntheticLambda3.run(Lists.java:5)
+	at com.example.Main.go(Main.java:9)
+Fatal signal 11 (SIGSEGV), code 1
+E/Bar(5): Method foo is unimplemented
+System.exit(3)

@@ -232,6 +232,10 @@ class _FakeSession:
     def __init__(self, run_dir):
         self.run_dir = run_dir
 
+    @staticmethod
+    def missing():
+        return None
+
     def start(self, width=1400, height=900):
         _FakeSession.started = True
 
@@ -448,3 +452,17 @@ def test_headless_session_passes_paths_as_arguments_not_shell_text(monkeypatch, 
     script = seen["args"][seen["args"].index("-c") + 1]
     assert str(s.run_dir) not in script and "$(" not in script.replace("$DBUS_SESSION_BUS_ADDRESS", "")
     assert str(s.run_dir / "bus") in seen["args"]
+
+
+def test_explicit_agent_that_does_not_exist_exit_3(tmp_prefix, apk, tmp_path, capsys):
+    c = tmp_path / "c"
+    assert main(["record", "-o", str(c), "--prefix", str(tmp_prefix), "--agent", str(tmp_path / "nope.so"), str(apk)]) == 3
+    assert "nope.so not found" in capsys.readouterr().err and not c.exists()
+
+
+def test_headless_without_kwin_exit_3_before_the_capture(tmp_prefix, apk, tmp_path, monkeypatch, capsys):
+    import atl_doctor.headless as headless
+    monkeypatch.setattr(headless.shutil, "which", lambda name: None)
+    c = tmp_path / "c"
+    assert main(["record", "--headless", "-o", str(c), "--prefix", str(tmp_prefix), str(apk)]) == 3
+    assert "kwin_wayland" in capsys.readouterr().err and not c.exists()

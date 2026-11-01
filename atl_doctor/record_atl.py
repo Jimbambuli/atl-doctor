@@ -251,6 +251,11 @@ def record_atl(opts: RecordOptions) -> int:
             opts.headless = True
         if make_atl_driver is _make_atl_driver and find_helper(INPUT_HELPER, None, opts.prefix) is None:
             raise PrerequisiteMissing("--steps needs the input helper atl-doctor-input (build the C helpers)")
+    if opts.headless and HeadlessSession.missing():
+        raise PrerequisiteMissing(HeadlessSession.missing())
+    explicit_agent = opts.agent or resolve(None, "ATL_DOCTOR_AGENT")
+    if explicit_agent and not Path(explicit_agent).is_file():
+        raise PrerequisiteMissing(f"agent {explicit_agent} not found (--agent / ATL_DOCTOR_AGENT)")
     info = read_apk(opts.apk)
     opts.apk = opts.apk.resolve()
     out = (opts.out or default_out_dir(datetime.now())).resolve()
@@ -283,6 +288,8 @@ def record_atl(opts: RecordOptions) -> int:
         opts.atl_args = ["-w", str(APP_WIDTH), "-h", str(APP_HEIGHT), *opts.atl_args]
     # without the counter nobody would consume the streamed trace: no trace then (it would grow without bound)
     wheel = find_helper(WHEEL_SHIM, None, opts.prefix) if opts.headless else None
+    if opts.headless and wheel is None:
+        _warn(f"wheel-shim unavailable: {WHEEL_SHIM} not found; scroll N scrolls smoothly instead of in notches")
     cmd, extra_env = build_command(opts, cap, plugin, agent, trace=counter is not None, wheel=wheel)
     trees = "ATL_VIEWDUMP" in extra_env
     if trees:

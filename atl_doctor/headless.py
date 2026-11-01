@@ -42,6 +42,11 @@ class HeadlessSession:
         self._n = 0
         self._script_lock = threading.Lock()  # mark screenshots run beside the step driver
 
+    @staticmethod
+    def missing() -> str | None:
+        """Why no session can be started here, or None."""
+        return None if shutil.which("kwin_wayland") else "--headless needs kwin_wayland (install KWin)"
+
     @property
     def log(self) -> Path:
         return self.run_dir / "kwin.log"

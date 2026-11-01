@@ -144,7 +144,8 @@ def probe_all(prefix: Path | None, atl_src: Path | None, android: bool, aosp: Pa
                      "build it with tools/build-jvmti-plugin.sh ART_TREE PREFIX"))
     for name, fname, hint in (("agent", AGENT_LIB, "build the C helpers (meson setup build agent && ninja -C build) or pass --agent"),
                               ("tracecount", TRACECOUNT, "build the C helpers (meson setup build agent && ninja -C build)"),
-                              ("input-helper", INPUT_HELPER, "build the C helpers (meson setup build agent && ninja -C build)")):
+                              ("input-helper", INPUT_HELPER, "build the C helpers (meson setup build agent && ninja -C build)"),
+                              ("wheel-shim", WHEEL_SHIM, "build the C helpers (meson setup build agent && ninja -C build)")):
         ps.append(_probe(name, find_helper(fname, None, prefix) is not None, f"{fname} not found", hint))
     ps.append(_probe("kwin", shutil.which("kwin_wayland") is not None, "kwin_wayland not in PATH",
                      "install KWin (needed for --headless)"))

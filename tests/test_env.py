@@ -6,7 +6,7 @@ import atl_doctor
 from atl_doctor import env
 from atl_doctor.cli import main
 
-EXPECTED = ["atl", "api-impl.jar", "atl-src", "jvmti-plugin", "agent", "tracecount", "input-helper", "kwin",
+EXPECTED = ["atl", "api-impl.jar", "atl-src", "jvmti-plugin", "agent", "tracecount", "input-helper", "wheel-shim", "kwin",
             "spectacle", "viewdump", "aosp"]
 
 

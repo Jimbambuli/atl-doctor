@@ -188,6 +188,16 @@ def _pick(spans: list[MethodSpan], sig: str) -> MethodSpan:
     return max(spans, key=lambda s: s.close - s.head)  # the real implementation, not a delegating overload
 
 
+def _empty_in_aosp(index: dict[str, Path], cls: str, name: str) -> bool:
+    """Every overload of cls#name has an empty body in AOSP (a hook that does nothing): ATL needs nothing for it."""
+    path = index.get(cls.split("$", 1)[0])
+    if path is None:
+        return False
+    f = _load(path)
+    spans = [x for x in f.methods if x.cls == cls and x.name == name]
+    return bool(spans) and all(x.open >= 0 and not f.m[x.open + 1:x.close].strip() for x in spans)
+
+
 def match(tree: AospTree, index: dict[str, Path], cls: str, method: str, world: World | None,
           stubs: dict, sig: str = "") -> AospMatch | None:
     """AOSP location, size, one level of dependencies and verdict of `cls#method`; None if AOSP lacks it."""
@@ -244,7 +254,7 @@ def match(tree: AospTree, index: dict[str, Path], cls: str, method: str, world: 
     missing, stubbed = [], []
     for d in deps:
         c, n = d.split("#", 1)
-        if not c.startswith(FRAMEWORK_PREFIXES):
+        if not c.startswith(FRAMEWORK_PREFIXES) or _empty_in_aosp(index, c, n):
             continue
         if (c, n) in stubs:
             stubbed.append(d)

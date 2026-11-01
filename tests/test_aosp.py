@@ -180,3 +180,36 @@ def test_scan_with_aosp(tmp_path, capsys):
     assert "aosp_sdk: 36" in out
     assert "AOSP 36: portable, frameworks/base/graphics/java/android/graphics/drawable/Drawable.java:24-31" in out
     assert "AOSP 36: needs-deps, frameworks/base/media/java/android/media/ThumbnailUtils.java:19-25" in out
+
+
+def _mini_tree(tmp_path):
+    d = tmp_path / "frameworks/base/core/java/android/app"
+    d.mkdir(parents=True)
+    (d / "Act.java").write_text("""package android.app;
+public class Act {
+    public void onUserInteraction() {
+        // hook for subclasses
+    }
+    public void onOther() { }
+    public void onReal() { int x = 1; }
+    public boolean dispatch() { onUserInteraction(); return true; }
+    public boolean dispatch2() { onUserInteraction(); onReal(); return true; }
+    public void dispatch3(Act a) { Act.helper(); }
+    static void helper() { }
+}
+""")
+    return open_aosp(tmp_path)
+
+
+def test_empty_aosp_callbacks_are_no_dependency(tmp_path):
+    t = _mini_tree(tmp_path)
+    st = stub_index([StubEntry("e0", "android.app.Act", "onUserInteraction", "", "x:1", "", ""),
+                     StubEntry("e1", "android.app.Act", "onReal", "", "x:2", "", ""),
+                     StubEntry("e2", "android.app.Act", "helper", "", "x:3", "", "")])
+    idx = class_index(t)
+    m = match(t, idx, "android.app.Act", "dispatch", World(), st)
+    assert m.verdict == "portable" and m.deps_stub == []              # onUserInteraction is empty in AOSP
+    m2 = match(t, idx, "android.app.Act", "dispatch2", World(), st)
+    assert m2.verdict == "needs-deps" and m2.deps_stub == ["android.app.Act#onReal"]  # a non-empty one still counts
+    m3 = match(t, idx, "android.app.Act", "dispatch3", World(), st)
+    assert m3.verdict == "portable"                                   # empty static helper: nothing to implement

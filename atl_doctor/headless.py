@@ -58,7 +58,11 @@ class HeadlessSession:
         (cfg / "kxkbrc").write_text("[Layout]\nLayoutList=us\nUse=true\n")  # fixed layout; the input helper reads it
         bus_file = self.run_dir / "bus"
         env = {**os.environ, "XDG_RUNTIME_DIR": str(self.run_dir), "XDG_CONFIG_HOME": str(cfg),
-               "KWIN_WAYLAND_NO_PERMISSION_CHECKS": "1", "KWIN_SCREENSHOT_NO_PERMISSION_CHECKS": "1"}
+               "KWIN_WAYLAND_NO_PERMISSION_CHECKS": "1", "KWIN_SCREENSHOT_NO_PERMISSION_CHECKS": "1",
+               # script print() is debug output of category js, read back from kwin.log: some distributions
+               # switch debug off (qtlogging.ini) and Qt may log to journald instead of stderr
+               "QT_LOGGING_RULES": ";".join(filter(None, [os.environ.get("QT_LOGGING_RULES"), "js.debug=true"])),
+               "QT_FORCE_STDERR_LOGGING": "1"}
         env.pop("WAYLAND_DISPLAY", None)
         env.pop("DISPLAY", None)
         # paths go in as arguments ($1, $2), never into the script text

@@ -483,3 +483,98 @@ def test_capture_path_that_breaks_the_agent_options_exit_2(tmp_prefix, apk, tmp_
         assert not out.exists()
     err = capsys.readouterr().err
     assert "must not contain ','" in err and "too long" in err
+
+
+# ------------------------------------------------------------------ --launcher
+def _launcher() -> str:
+    """A launcher command: the fake ATL behind an interpreter, the way `flatpak run ID` stands for ATL."""
+    import shlex
+    return shlex.join([sys.executable, "-I", str(HERE / "fake_atl.py")])
+
+
+def test_build_command_with_launcher_and_no_prefix(tmp_path):
+    cap = Capture.create(tmp_path / "c", "atl")
+    opts = RecordOptions(apk=Path("/x/app.apk"), out=None, prefix=None, atl_src=None, agent=None,
+                         atl_args=["--sdk-int", "34"], launcher="flatpak run --user org.example.Starter")
+    cmd, env = build_command(opts, cap, None, None, trace=False)
+    assert cmd == ["flatpak", "run", "--user", "org.example.Starter", "/x/app.apk", "--sdk-int", "34"]
+    assert "LD_LIBRARY_PATH" not in env
+
+
+def test_record_with_launcher_needs_no_prefix(apk, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("ATL_DOCTOR_PREFIX", raising=False)
+    c = tmp_path / "c"
+    assert main(["record", "-o", str(c), "--launcher", _launcher(), str(apk), "--", "--exit-code", "0"]) == 0
+    m = Capture.open(c).read_manifest()
+    assert m.command[:3] == [sys.executable, "-I", str(HERE / "fake_atl.py")] and m.exit_status == 0
+    assert m.environment["launcher"] == _launcher() and "prefix" not in m.environment
+    assert "hello from fake atl" in (c / "atl.log").read_text()
+
+
+def test_record_launcher_not_found_exit_3(apk, tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("ATL_DOCTOR_PREFIX", raising=False)
+    assert main(["record", "-o", str(tmp_path / "c"), "--launcher", "no-such-launcher-xyz run", str(apk)]) == 3
+    assert "no-such-launcher-xyz" in capsys.readouterr().err
+
+
+def test_launcher_and_prefix_exclude_each_other(apk, tmp_prefix, tmp_path):
+    assert main(["record", "-o", str(tmp_path / "c"), "--prefix", str(tmp_prefix), "--launcher", _launcher(),
+                 str(apk)]) == 2
+
+
+def test_no_memory_rows_with_launcher(apk, tmp_path, monkeypatch):
+    """The launcher's own process (flatpak run, a wrapper) is not the app: its memory would mislead."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    c = tmp_path / "c"
+    t, res = _record_in_thread(["record", "-o", str(c), "--launcher", _launcher(), str(apk), "--", "--wait"])
+    try:
+        assert wait_for(lambda: (c / "control").exists())
+        assert main(["mark", "-d", str(c), "Open"]) == 0
+        assert wait_for(lambda: [k.name for k in Capture(c).read_marks()] == ["start", "Open"])
+    finally:
+        wait_for(lambda: "atl_pid" in Capture(c).read_manifest().environment)
+        os.kill(int(Capture(c).read_manifest().environment["atl_pid"]), signal.SIGTERM)
+        t.join(20)
+    assert res["rc"] == 0 and not (c / "memory.tsv").exists()
+
+
+def test_no_trace_starts_without_method_trace(built, tmp_prefix, apk, tmp_path):
+    """--no-trace: full speed (timings, slow first starts), at the price of the stub hits."""
+    helpers = tmp_prefix / "lib/atl-doctor"
+    helpers.mkdir(parents=True)
+    shutil.copy(built / "atl-doctor-tracecount", helpers)
+    c = tmp_path / "c"
+    assert main(["record", "--no-trace", "-o", str(c), "--prefix", str(tmp_prefix), str(apk)]) == 0
+    m = Capture.open(c).read_manifest()
+    assert not any(a.startswith("-Xmethod-trace") for a in m.command)
+    assert not (c / "trace/tracecount.log").exists()
+
+
+@pytest.mark.parametrize("rules, expected", [(None, "js.debug=true"), ("foo.info=false", "foo.info=false;js.debug=true")])
+def test_headless_session_lets_kwin_script_output_reach_its_log(monkeypatch, tmp_path, rules, expected):
+    """KWin scripts print at debug level (category js) to KWin's log, which the session reads. Distributions switch
+    debug output off (Fedora: qtlogging.ini *.debug=false) and Qt sends it to journald instead of stderr."""
+    from atl_doctor import headless
+    from atl_doctor.errors import DoctorError
+
+    seen = {}
+
+    class Dead:
+        def poll(self):
+            return 1
+
+    def popen(args, **kw):
+        seen["env"] = kw["env"]
+        return Dead()
+
+    if rules is None:
+        monkeypatch.delenv("QT_LOGGING_RULES", raising=False)
+    else:
+        monkeypatch.setenv("QT_LOGGING_RULES", rules)
+    monkeypatch.setattr(headless.subprocess, "Popen", popen)
+    s = headless.HeadlessSession(tmp_path / "r")
+    monkeypatch.setattr(s, "stop", lambda: None)
+    with pytest.raises(DoctorError):
+        s.start()
+    assert seen["env"]["QT_LOGGING_RULES"] == expected and seen["env"]["QT_FORCE_STDERR_LOGGING"] == "1"

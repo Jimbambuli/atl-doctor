@@ -50,6 +50,8 @@ class RecordOptions:
     heap: bool = False
     android: bool = False
     atl_args: list[str] = field(default_factory=list)
+    launcher: str | None = None  # command that starts ATL instead of PREFIX/bin/android-translation-layer
+    trace: bool = True  # method trace (stub hits); slows the app down a lot
 
 
 def default_out_dir(now: datetime) -> Path:
@@ -60,14 +62,15 @@ def build_command(opts: RecordOptions, cap: Capture, plugin: Path | None, agent:
                   trace: bool = True, wheel: Path | None = None) -> tuple[list[str], dict[str, str]]:
     """ATL command line and the environment variables to add."""
     c = cap.root
-    cmd = [str(opts.prefix / "bin/android-translation-layer"), str(opts.apk), *opts.atl_args]
+    start = shlex.split(opts.launcher) if opts.launcher else [str(opts.prefix / "bin/android-translation-layer")]
+    cmd = [*start, str(opts.apk), *opts.atl_args]
     if trace:
         cmd += ["-X", "-Xmethod-trace", "-X", "-Xmethod-trace-stream",
                 "-X", f"-Xmethod-trace-file:{c}/{TRACE_DIR}/{TRACE_FILE}"]
     if plugin and agent:
         cmd += ["-X", f"-agentpath:{agent}={c}/{AGENT},late={plugin},latesec=3,marks={c}/{MARKS},arm={c}/{ARM_FILE}"
                       f",frames,hang={HANG_MS}" + (",heap" if opts.heap else "")]
-    env = {"LD_LIBRARY_PATH": f"{opts.prefix}/lib64:{opts.prefix}/lib64/art"}
+    env = {"LD_LIBRARY_PATH": f"{opts.prefix}/lib64:{opts.prefix}/lib64/art"} if opts.prefix else {}
     if has_viewdump(opts.prefix):
         env["ATL_VIEWDUMP"] = f"{c}/{TREES}"
     if wheel and " " in str(wheel):  # LD_PRELOAD splits at spaces too
@@ -242,9 +245,16 @@ def record_atl(opts: RecordOptions) -> int:
     from .sources.dex import read_apk
     from .steps import parse_steps
 
-    atl = opts.prefix / "bin/android-translation-layer"
-    if not atl.is_file():
-        raise PrerequisiteMissing(f"{atl} not found (pass the ATL installation prefix with --prefix)")
+    if opts.launcher:
+        import shutil
+
+        first = (shlex.split(opts.launcher) or [""])[0]
+        if not shutil.which(first):
+            raise PrerequisiteMissing(f"launcher {first!r} not found (--launcher)")
+    else:
+        atl = opts.prefix / "bin/android-translation-layer"
+        if not atl.is_file():
+            raise PrerequisiteMissing(f"{atl} not found (pass the ATL installation prefix with --prefix)")
     steps = None
     if opts.steps:
         try:
@@ -280,7 +290,7 @@ def record_atl(opts: RecordOptions) -> int:
             probes[i] = p = Probe("agent", True) if agent else Probe("agent", False, f"{opts.agent} not found", p.hint)
         if p.name in RECORD_PROBES and not p.available:
             _warn(f"{p.name} unavailable: {p.reason}")
-    counter = find_helper(TRACECOUNT, None, opts.prefix)
+    counter = find_helper(TRACECOUNT, None, opts.prefix) if opts.trace else None
 
     trace_dir = cap.path(TRACE_DIR)
     trace_dir.mkdir()
@@ -315,7 +325,8 @@ def record_atl(opts: RecordOptions) -> int:
     m.apk, m.package, m.version_name = str(opts.apk), info.package, info.version_name
     m.command = cmd
     m.probes = [asdict(p) for p in probes]
-    m.environment = {"prefix": str(opts.prefix), **({"atl_src": str(opts.atl_src)} if opts.atl_src else {})}
+    m.environment = {**({"launcher": opts.launcher} if opts.launcher else {"prefix": str(opts.prefix)}),
+                     **({"atl_src": str(opts.atl_src)} if opts.atl_src else {})}
     cap.write_manifest(m)
 
     session = driver = None
@@ -350,7 +361,7 @@ def record_atl(opts: RecordOptions) -> int:
             if steps is not None:
                 driver = make_atl_driver(cap, session, opts, info.package)
                 steps_state = _start_steps(cap, driver, steps, str(opts.steps))
-            rc = _record_loop(cap, proc, stop, ctl, trees, steps_state, session)
+            rc = _record_loop(cap, proc, stop, ctl, trees, steps_state, session, memory=not opts.launcher)
     finally:
         if driver is not None:
             driver.close()
@@ -362,8 +373,9 @@ def record_atl(opts: RecordOptions) -> int:
 
 
 def _record_loop(cap: Capture, proc: subprocess.Popen, stop: _Stop, ctl: int, trees: bool, steps_state: dict,
-                 session: HeadlessSession | None = None) -> int:
-    """Until ATL ends, SIGINT/SIGTERM or the steps are done; serves the control FIFO meanwhile."""
+                 session: HeadlessSession | None = None, memory: bool = True) -> int:
+    """Until ATL ends, SIGINT/SIGTERM or the steps are done; serves the control FIFO meanwhile.
+    memory: sample proc's memory per mark (not for a launcher: its process is not the app)."""
     started, buf = time.monotonic(), bytearray()
     pending: list[threading.Thread] = []  # tree/screenshot requests of the marks
     while proc.poll() is None and stop.by is None and not steps_state.get("done"):
@@ -376,19 +388,21 @@ def _record_loop(cap: Capture, proc: subprocess.Popen, stop: _Stop, ctl: int, tr
         if ready:
             try:
                 for mk in _handle_control(cap, os.read(ctl, 4096), buf):
-                    _memory(cap, proc.pid, mk.index)
+                    if memory:
+                        _memory(cap, proc.pid, mk.index)
                     if trees:
                         pending.append(_request_tree(cap, mk, session))
             except BlockingIOError:
                 pass
     for mk in drain_control(cap, ctl, buf):  # a mark sent by the last step
-        _memory(cap, proc.pid, mk.index)
+        if memory:
+            _memory(cap, proc.pid, mk.index)
         if trees:
             pending.append(_request_tree(cap, mk, session))
     for t in pending:  # ATL must answer the tree (and pose for the screenshot) before it is ended
         if proc.poll() is None:
             t.join(TREE_WAIT_S)
-    if proc.poll() is None:
+    if memory and proc.poll() is None:
         _memory(cap, proc.pid, "end")
     if stop.by is not None:
         _warn(f"{stop.by}: stopping ATL")
@@ -466,10 +480,15 @@ def _run_record(args: argparse.Namespace) -> int:
         return record_android(RecordOptions(apk=Path(args.apk), out=Path(args.output) if args.output else None,
                                             prefix=Path(prefix) if prefix else None, atl_src=None, agent=None,
                                             steps=Path(args.steps) if args.steps else None, android=True))
-    if not prefix:
-        raise PrerequisiteMissing("no ATL prefix (pass --prefix DIR or set ATL_DOCTOR_PREFIX)")
+    if args.launcher and args.prefix:
+        raise UsageError("--launcher and --prefix exclude each other")
+    if args.launcher:
+        prefix = None
+    elif not prefix:
+        raise PrerequisiteMissing("no ATL prefix (pass --prefix DIR or set ATL_DOCTOR_PREFIX, or --launcher CMD)")
     atl_src = resolve(args.atl_src, "ATL_DOCTOR_ATL_SRC")
-    opts = RecordOptions(apk=Path(args.apk), out=Path(args.output) if args.output else None, prefix=Path(prefix),
+    opts = RecordOptions(apk=Path(args.apk), out=Path(args.output) if args.output else None,
+                         prefix=Path(prefix) if prefix else None, launcher=args.launcher, trace=args.trace,
                          atl_src=Path(atl_src) if atl_src else None, agent=Path(args.agent) if args.agent else None,
                          headless=args.headless, steps=Path(args.steps) if args.steps else None, heap=args.heap,
                          atl_args=list(args.atl_args))
@@ -486,11 +505,15 @@ def register(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("record", help="record an app under ATL until it ends or SIGINT", parents=[common_parser()])
     p.add_argument("-o", "--output", metavar="DIR", help="capture directory (default: ./atl-doctor-YYYYmmdd-HHMMSS)")
     p.add_argument("--prefix", metavar="DIR", help="ATL installation prefix (default: $ATL_DOCTOR_PREFIX)")
+    p.add_argument("--launcher", metavar="CMD",
+                   help="start ATL with this command (APK and ATL-ARGS appended) instead of a prefix, e.g. 'flatpak run ID'")
     p.add_argument("--atl-src", metavar="DIR", help="ATL source tree for the stub list (default: $ATL_DOCTOR_ATL_SRC)")
     p.add_argument("--agent", metavar="PATH", help="JVMTI agent library (default: $ATL_DOCTOR_AGENT, then the helper dirs)")
     p.add_argument("--headless", action="store_true",
                    help="run ATL in a private invisible KWin session (kwin_wayland --virtual)")
     p.add_argument("--steps", metavar="FILE", help="drive the app with a step file; implies --headless under ATL")
+    p.add_argument("--no-trace", dest="trace", action="store_false",
+                   help="no method trace: the app runs at full speed, but the report has no stub hits")
     p.add_argument("--heap", action="store_true",
                    help="count instances and bytes per class at every mark (agent; slow, forces a GC per mark)")
     p.add_argument("--android", action="store_true",

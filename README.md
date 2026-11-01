@@ -32,6 +32,8 @@ Configuration: options win over the environment variables `ATL_DOCTOR_PREFIX`, `
 atl-doctor check --prefix ~/.local/opt/atl            # what can be measured on this machine
 atl-doctor scan --prefix ~/.local/opt/atl --atl-src ~/atl-src app.apk   # static coverage, nothing is started
 atl-doctor record -o run1 --prefix ~/.local/opt/atl app.apk   # record until the app ends (or Ctrl-C)
+atl-doctor record -o run2 --steps s.steps --launcher "flatpak run --user --filesystem=$PWD ID" app.apk
+                                                      # ATL started by another command (here a Flatpak), see the manual
 atl-doctor mark -d run1 "Settings open"               # from another terminal: start a new phase
 atl-doctor report run1                                # text report on stdout
 atl-doctor report -f json -o run1.json run1           # machine-readable; -f html -o FILE for a page

@@ -258,7 +258,11 @@ static void key_combo(char *combo)
 {
 	uint32_t codes[MAXKEYS * 2];
 	uint8_t n = 0;
-	for (char *name = strtok(combo, "+"); name && n < MAXKEYS * 2 - 1; name = strtok(NULL, "+")) {
+	for (char *name = strtok(combo, "+"); name; name = strtok(NULL, "+")) {
+		if (n + 3 > MAXKEYS * 2) { /* one name gives up to three codes (Shift, AltGr, key) */
+			report("ERROR key: too many keys in one combination%s%.0u\n", "", 0);
+			return;
+		}
 		if (!strcmp(name, "ctrl")) {
 			codes[n++] = KEY_LEFTCTRL;
 		} else if (!strcmp(name, "shift")) {

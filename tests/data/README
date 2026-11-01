@@ -1,1 +1,3 @@
 Test data is generated at run time by tests/dexgen.py.
+capture-atl/ is a hand-written synthetic capture (no app data); agent-run1/2.tsv are synthetic agent outputs of
+the same causes with different numbers, hashes and lambda indices.

@@ -1,0 +1,2 @@
+E	77	4	java.lang.NullPointerException	null at 0xcafe0001	org.example.demo.A.b	B:android.widget.TextView.onDraw|org.example.demo.A$2.b
+E	99	4	java.lang.IllegalArgumentException	index 4 of 1	UNCAUGHT	org.example.demo.K$$ExternalSyntheticLambda0.run|B:android.os.Looper.loop

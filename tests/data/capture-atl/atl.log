@@ -1,0 +1,5 @@
+hello from fake atl
+java.lang.NullPointerException: Attempt to read field 0x2a on null
+	at android.graphics.drawable.Drawable.inflate(Drawable.java:10)
+	at org.example.demo.Main.onCreate(Main.java:5)
+Fatal signal 11 (SIGSEGV), code 1

@@ -1,0 +1,8 @@
+I	1000100	42	loaded
+L	1000200	42	A	onCreate	org.example.demo.Main	android.app.Activity.onCreate	0a1b2c3d	-
+L	1000300	42	A	onResume	org.example.demo.Main	android.app.Activity.onResume	0a1b2c3d	-
+E	1000400	42	java.lang.NullPointerException	Attempt to read field 0x1f on null	org.example.demo.Main.onCreate	B:android.graphics.drawable.Drawable.inflate|org.example.demo.Main.onCreate|B:android.app.Activity.performCreate
+L	2000100	42	W	onWindowFocusChanged	org.example.demo.Main	org.example.demo.Main.onWindowFocusChanged	0a1b2c3d	-
+E	2000200	43	java.lang.IllegalStateException	bad state 7	UNCAUGHT	org.example.demo.ImportTask$$ExternalSyntheticLambda3.run|B:android.os.Handler.dispatchMessage
+E	2000300	43	broken line with too few columns
+E	2000400	43	java.lang.Runtime

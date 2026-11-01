@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "tool_version": "0.1.0",
+  "side": "atl",
+  "apk": "demo.apk",
+  "package": "org.example.demo",
+  "version_name": "1.0",
+  "sdk_int": 34,
+  "command": ["android-translation-layer", "demo.apk"],
+  "started": "2026-11-01T10:00:00+00:00",
+  "ended": "2026-11-01T10:01:00+00:00",
+  "exit_status": null,
+  "signal": "SIGSEGV",
+  "probes": [],
+  "environment": {}
+}

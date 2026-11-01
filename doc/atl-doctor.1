@@ -26,7 +26,7 @@ atl-doctor \- find out why an Android app does not run correctly under Android T
 [\fB\-\-prefix\fR \fIDIR\fR] [\fB\-\-atl\-src\fR \fIDIR\fR] [\fB\-\-aosp\fR \fIDIR\fR] [\fB\-\-android\fR]
 .br
 .B atl-doctor scan
-[\fB\-f\fR \fItext\fR] [\fB\-o\fR \fIFILE\fR] [\fB\-\-atl\-src\fR \fIDIR\fR] [\fB\-\-prefix\fR \fIDIR\fR]
+[\fB\-f\fR \fItext\fR|\fIjson\fR|\fIhtml\fR] [\fB\-o\fR \fIFILE\fR] [\fB\-\-atl\-src\fR \fIDIR\fR] [\fB\-\-prefix\fR \fIDIR\fR]
 [\fB\-\-compare\-src\fR \fIDIR\fR] [\fB\-\-aosp\fR \fIDIR\fR] [\fB\-\-sdk\-int\fR \fIN\fR] \fIAPK\fR...
 .PP
 .B atl-doctor
@@ -169,8 +169,8 @@ Static coverage of one or more APKs against ATL, without starting them.
 Exit status 1 if an APK had to be skipped.
 .RS
 .TP
-.BR \-f ", " \-\-format " \fItext\fR"
-Output format.
+.BR \-f ", " \-\-format " \fItext\fR|\fIjson\fR|\fIhtml\fR"
+Output format (default: text). \fBhtml\fR needs \fB\-o\fR.
 .TP
 .BR \-o ", " \-\-output " \fIFILE\fR"
 Write to \fIFILE\fR instead of standard output.

@@ -142,3 +142,17 @@ def test_compare_src_second_state(prefix, tmp_path, capsys):
     assert r.extras["apps"]["main"][0]["missing_member"] == 1 and r.extras["apps"]["compare"][0]["missing_class"] == 1
     rc = main(["scan", "--atl-src", str(SRC), "--prefix", str(prefix), "--compare-src", str(cmp_src), str(good)])
     assert rc == 0 and "Coverage (compare)" in capsys.readouterr().out
+
+
+def test_cli_json_and_html(prefix, tmp_path):
+    import json
+    good = apk(tmp_path, "good.apk", ["View.setAlpha", "ThumbnailUtils.createImageThumbnail"])
+    base = ["scan", "--atl-src", str(SRC), "--prefix", str(prefix)]
+    assert main(base + ["-f", "json", "-o", str(tmp_path / "s.json"), str(good)]) == 0
+    doc = json.loads((tmp_path / "s.json").read_text())
+    assert doc["mode"] == "scan" and doc["extras"]["apps"]["main"][0]["package"] == "org.example.good"
+    assert any(f["id"] == "missing:android.media.ThumbnailUtils#createImageThumbnail" for f in doc["findings"])
+    assert main(base + ["-f", "html", "-o", str(tmp_path / "s.html"), str(good)]) == 0
+    html = (tmp_path / "s.html").read_text()
+    assert "Coverage" in html and "ThumbnailUtils" in html
+    assert main(base + ["-f", "html", str(good)]) == 2

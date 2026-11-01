@@ -194,6 +194,8 @@ def _compare_state(src: Path, atl_src_libcore: list[Path]) -> AtlState:
 
 
 def _run_scan(args: argparse.Namespace) -> int:
+    if args.format == "html" and not args.output:
+        raise UsageError("-f html needs -o FILE")
     prefix = resolve(args.prefix, "ATL_DOCTOR_PREFIX")
     atl_src = resolve(args.atl_src, "ATL_DOCTOR_ATL_SRC")
     if not prefix:
@@ -207,12 +209,12 @@ def _run_scan(args: argparse.Namespace) -> int:
     if args.compare_src:
         states.append(_compare_state(Path(args.compare_src), core))
     rep = scan_many([Path(a) for a in args.apks], states, args.sdk_int)
-    from ..report import apply_aosp, needs_aosp, render_text
+    from ..report import apply_aosp, needs_aosp, render_html, render_json, render_text
 
     if needs_aosp(rep) or resolve(args.aosp, "ATL_DOCTOR_AOSP"):
         apply_aosp(rep, args.aosp, str(prefix), stub_index(states[0].stubs), states[0].world)
 
-    text = render_text(rep)
+    text = {"text": render_text, "json": render_json, "html": render_html}[args.format](rep)
     if args.output:
         Path(args.output).write_text(text, encoding="utf-8")
     else:
@@ -224,7 +226,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     from ..cli import common_parser
 
     p = sub.add_parser("scan", help="static coverage of APKs against ATL (no start)", parents=[common_parser()])
-    p.add_argument("-f", "--format", choices=["text"], default="text")
+    p.add_argument("-f", "--format", choices=["text", "json", "html"], default="text")
     p.add_argument("-o", "--output", metavar="FILE", help="write to FILE instead of stdout")
     p.add_argument("--atl-src", metavar="DIR", help="ATL source tree (default: $ATL_DOCTOR_ATL_SRC)")
     p.add_argument("--prefix", metavar="DIR", help="ATL installation prefix (default: $ATL_DOCTOR_PREFIX)")

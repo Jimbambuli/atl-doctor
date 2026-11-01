@@ -10,7 +10,11 @@ from tracegen import ENTER, EXIT, encode_records, header, make_trace, method_op,
 
 pytestmark = pytest.mark.skipif(not shutil.which("meson"), reason="meson missing")
 
-START = 1_700_000_000_000_000
+START = 1_000_000_000  # CLOCK_MONOTONIC us, like ART's trace header
+
+
+def boot_offset() -> int:
+    return (time.clock_gettime_ns(time.CLOCK_BOOTTIME) - time.clock_gettime_ns(time.CLOCK_MONOTONIC)) // 1000
 STUB = (1, "android.graphics.drawable.Drawable", "parseBlendMode",
         "(ILandroid/graphics/BlendMode;)Landroid/graphics/BlendMode;")
 APP = (2, "org.example.demo.ImportTask", "run", "()V")
@@ -19,8 +23,10 @@ FW = (4, "android.app.Activity", "onCreate", "(Landroid/os/Bundle;)V")
 METHODS = [STUB, APP, LIB, FW]
 
 
-def marks(path: Path, *wall: int) -> Path:
-    path.write_text("".join(f"{i}\t{i}\t{w}\t{'start' if i == 0 else f'm{i}'}\n" for i, w in enumerate(wall)))
+def marks(path: Path, *mono: int) -> Path:
+    """marks.tsv with CLOCK_BOOTTIME times that correspond to the given CLOCK_MONOTONIC times"""
+    off = boot_offset()
+    path.write_text("".join(f"{i}\t{t + off}\t{i}\t{'start' if i == 0 else f'm{i}'}\n" for i, t in enumerate(mono)))
     return path
 
 
@@ -103,6 +109,16 @@ def test_tracecount_v2_single_clock(built, tmp_path):
                     watch(tmp_path / "w", "\t".join(STUB[1:])))
     assert r.returncode == 0, r.stderr
     assert {"0\t0x4\t1", "1\t0x4\t1"} <= table(f"{out}.counts")
+
+
+def test_tracecount_streaming_versions(built, tmp_path):
+    for ver in (0xF2, 0xF3):
+        make_trace(tmp_path / "t.bin", ver, START, METHODS, call(1, APP, STUB, 10) + call(1, APP, STUB, 2000))
+        out = tmp_path / f"tr{ver}"
+        r = run_counter(built, tmp_path / "t.bin", marks(tmp_path / "m", START, START + 1000), out,
+                        watch(tmp_path / "w", "\t".join(STUB[1:])))
+        assert r.returncode == 0, r.stderr
+        assert {"0\t0x4\t1", "1\t0x4\t1"} <= table(f"{out}.counts"), ver
 
 
 def test_tracecount_phase_limit(built, tmp_path):

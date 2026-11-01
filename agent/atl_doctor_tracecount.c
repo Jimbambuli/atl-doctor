@@ -5,7 +5,9 @@
 // usage: atl-doctor-tracecount TRACE MARKS OUTPREFIX WATCH APP_PREFIX
 //   TRACE       the growing trace file; what has been read is released with fallocate(PUNCH_HOLE)
 //   MARKS       marks.tsv of the capture ("index\tboot_us\twall_us\tname"); re-read while running.
-//               A record belongs to the last mark whose wall time <= record time (before the first: phase 0).
+//               ART stamps the trace with CLOCK_MONOTONIC (header start time + wall delta); the marks' CLOCK_BOOTTIME
+//               is converted with the current BOOTTIME-MONOTONIC offset (time suspended since boot).
+//               A record belongs to the last mark at or before it (before the first: phase 0).
 //               Phases 0..255; later marks count to phase 255.
 //   OUTPREFIX   outputs OUTPREFIX.methods (id\tclass\tname\tsig), .counts (phase\tid\tn),
 //               .callers (phase\tstub_id\tcaller_id\tkind\tn), .threads (tid\tname); ends when OUTPREFIX.stop exists
@@ -20,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #define MAXPH 256
@@ -124,16 +127,24 @@ static void note_methods(const char *s, uint16_t len) {
 	}
 }
 
+static int64_t boot_minus_mono_us(void) {
+	struct timespec b, m;
+	clock_gettime(CLOCK_BOOTTIME, &b); clock_gettime(CLOCK_MONOTONIC, &m);
+	return ((int64_t)b.tv_sec - m.tv_sec) * 1000000 + (b.tv_nsec - m.tv_nsec) / 1000;
+}
+
 static void load_marks(void) {
 	FILE *f = fopen(marksfile, "r");
 	if (!f) return;
 	char line[4096]; nmarks = 0;
+	int64_t off = boot_minus_mono_us();
 	while (nmarks < MAXMARKS && fgets(line, sizeof line, f)) {
 		if (!strchr(line, '\n')) break;  // partial last line
 		uint64_t idx, boot, wall;
 		if (sscanf(line, "%" SCNu64 "\t%" SCNu64 "\t%" SCNu64, &idx, &boot, &wall) != 3) continue;
 		if (idx >= MAXPH && !limit_reported) { fprintf(stderr, "phase limit %u reached\n", MAXPH); limit_reported = 1; }
-		mark_t[nmarks] = wall; mark_p[nmarks++] = (uint8_t)(idx >= MAXPH ? MAXPH - 1 : idx);
+		(void)wall;
+		mark_t[nmarks] = (uint64_t)((int64_t)boot - off); mark_p[nmarks++] = (uint8_t)(idx >= MAXPH ? MAXPH - 1 : idx);
 	}
 	fclose(f);
 }
@@ -226,7 +237,9 @@ int main(int argc, char **argv) {
 			uint32_t magic; memcpy(&magic, buf, 4);
 			if (magic != 0x574f4c53) { fprintf(stderr, "atl-doctor-tracecount: bad magic %08x\n", magic); return 1; }
 			uint16_t ver, hl; memcpy(&ver, buf + 4, 2); memcpy(&hl, buf + 6, 2); memcpy(&start_us, buf + 8, 8);
-			recsz = ver >= 3 ? (uint16_t)(buf[16] | (buf[17] << 8)) : 10;
+			// 2 = single clock, 3 = dual clock (record size in the header); streaming mode adds 0xF0
+			recsz = (ver & 0x0F) >= 3 ? (uint16_t)(buf[16] | (buf[17] << 8)) : 10;
+			if (recsz < 10) { fprintf(stderr, "atl-doctor-tracecount: bad record size %u\n", recsz); return 1; }
 			used = hl; hdr = 1;
 			continue;
 		}

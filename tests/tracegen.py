@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Synthetic ART streaming method traces (the format `-Xmethod-trace-stream` writes)."""
+"""Synthetic ART streaming method traces (the format `-Xmethod-trace-stream` writes).
+
+Version 2 = single clock (10-byte records), 3 = dual clock (14 bytes); ART's streaming mode sets 0xF0 on top
+(0xF2/0xF3). The header start time is CLOCK_MONOTONIC in microseconds.
+"""
 import struct
 from pathlib import Path
 
@@ -9,7 +13,7 @@ ENTER, EXIT = 0, 1
 
 def header(version: int, start_us: int) -> bytes:
     h = struct.pack("<IHHQ", MAGIC, version, 32, start_us)
-    h += struct.pack("<H", 14 if version >= 3 else 10)  # record size (only read for v3)
+    h += struct.pack("<H", 14 if version & 0x0F >= 3 else 10)  # record size (only read for v3)
     return h.ljust(32, b"\0")
 
 
@@ -28,7 +32,7 @@ def encode_records(version: int, recs: list[tuple[int, int, int, int]]) -> bytes
     out = b""
     for tid, mid, action, wall in recs:
         out += struct.pack("<HI", tid, mid << 2 | action)
-        out += struct.pack("<II", wall, wall) if version >= 3 else struct.pack("<I", wall)
+        out += struct.pack("<II", wall, wall) if version & 0x0F >= 3 else struct.pack("<I", wall)
     return out
 
 

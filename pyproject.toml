@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "atl-doctor"
+version = "0.1.0"
+description = "Diagnose why an Android app does not run (correctly) under Android Translation Layer"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+authors = [{ name = "Jimbambuli" }]
+
+[project.scripts]
+atl-doctor = "atl_doctor.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["atl_doctor*"]
+
+[tool.setuptools.package-data]
+atl_doctor = ["data/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

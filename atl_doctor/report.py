@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -108,8 +109,14 @@ def _run_report(args: argparse.Namespace) -> int:
     from .sources.log import parse_logs
 
     res = parse_logs([Path(p) for p in args.log])
+    findings = res.findings
+    atl_src = args.atl_src or os.environ.get("ATL_DOCTOR_ATL_SRC")
+    if atl_src:
+        from .sources.stubs import build_stub_list, match_log_stubs
+
+        findings = match_log_stubs(findings, build_stub_list(Path(atl_src), []))
     env = {k: res.header[k] for k in ENV_KEYS if k in res.header}
-    text = render_text(Report("log", env, [], res.phases, res.findings))
+    text = render_text(Report("log", env, [], res.phases, findings))
     if args.output:
         Path(args.output).write_text(text, encoding="utf-8")
     else:
@@ -124,5 +131,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("-f", "--format", choices=["text"], default="text")
     p.add_argument("-o", "--output", metavar="FILE", help="write to FILE instead of stdout")
     p.add_argument("--log", action="append", metavar="FILE", help="log mode: one log file per phase (repeatable)")
+    p.add_argument("--atl-src", metavar="DIR", help="ATL source tree; match logged stub messages against its stub list "
+                                                    "(default: $ATL_DOCTOR_ATL_SRC)")
     p.add_argument("dirs", nargs="*", metavar="DIR", help="capture directory [and Android capture directory]")
     p.set_defaults(func=_run_report)

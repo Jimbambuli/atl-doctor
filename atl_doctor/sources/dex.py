@@ -77,8 +77,8 @@ class Dex:
         c, ty, n = struct.unpack_from("<HHI", self.b, self.field_o + 8 * i)
         return self.type(c), self.string(n) + ":" + self.type(ty)
 
-    def _class_data(self, data_off: int) -> Iterator[tuple[str, int, int]]:
-        """yield (kind 'f'|'m', member idx, code_off) of one class_data_item"""
+    def _class_data(self, data_off: int) -> Iterator[tuple[str, int, int, int]]:
+        """yield (kind 'f'|'m', member idx, code_off, access flags) of one class_data_item"""
         o = data_off
         sf, o = uleb(self.b, o)
         inf, o = uleb(self.b, o)
@@ -89,11 +89,11 @@ class Dex:
             for _ in range(cnt):
                 d, o = uleb(self.b, o)
                 idx += d
-                _, o = uleb(self.b, o)
+                acc, o = uleb(self.b, o)
                 code = 0
                 if kind == "m":
                     code, o = uleb(self.b, o)
-                yield kind, idx, code
+                yield kind, idx, code, acc
 
     def classes(self) -> Iterator[tuple[str, str | None, list[str], set[str]]]:
         """(name, super, interfaces, declared members)"""
@@ -106,7 +106,7 @@ class Dex:
                 ifs = [self.type(struct.unpack_from("<H", self.b, ifo + 4 + 2 * j)[0]) for j in range(n)]
             members: set[str] = set()
             if data:
-                for kind, idx, _ in self._class_data(data):
+                for kind, idx, _, _ in self._class_data(data):
                     members.add(self.method(idx)[1] if kind == "m" else self.field(idx)[1])
             yield self.type(ci), supn, ifs, members
 
@@ -116,9 +116,19 @@ class Dex:
             ci, _, _, _, _, _, data, _ = struct.unpack_from("<8I", self.b, self.cls_o + 32 * k)
             if not data:
                 continue
-            for kind, idx, code in self._class_data(data):
+            for kind, idx, code, _ in self._class_data(data):
                 if kind == "m" and code:
                     yield self.type(ci), code, self.method(idx)[1]
+
+    def methods(self) -> Iterator[tuple[str, str, int, int]]:
+        """(class, member, code_off, access flags) for every method defined here, code_off 0 if none"""
+        for k in range(self.cls_n):
+            ci, _, _, _, _, _, data, _ = struct.unpack_from("<8I", self.b, self.cls_o + 32 * k)
+            if not data:
+                continue
+            for kind, idx, code, acc in self._class_data(data):
+                if kind == "m":
+                    yield self.type(ci), self.method(idx)[1], code, acc
 
     def instructions(self, code_off: int) -> Iterator[tuple[int, array.array, int]]:
         """yield (opcode, units, pc) of one code item; payload pseudo-instructions are skipped"""

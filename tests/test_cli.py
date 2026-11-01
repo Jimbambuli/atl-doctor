@@ -28,3 +28,17 @@ def test_missing_log_file_exit_1(capsys):
 
 def test_help_exit_0(capsys):
     assert main(["report", "--help"]) == 0
+
+
+def test_report_log_with_atl_src(capsys):
+    assert main(["report", "--log", str(DATA / "logs/plain.log"), "--atl-src", str(DATA / "atl-src")]) == 0
+    out = capsys.readouterr().out
+    assert "stub android.content.res.AssetManager#destroy" in out
+    assert "AssetManager: AssetManager.destroy()" not in out
+
+
+def test_report_log_atl_src_from_environment(capsys, monkeypatch):
+    monkeypatch.setenv("ATL_DOCTOR_ATL_SRC", str(DATA / "atl-src"))
+    assert main(["report", "--log", str(DATA / "logs/plain.log")]) == 0
+    assert "stub android.content.res.AssetManager#destroy" in capsys.readouterr().out
+    assert main(["report", "--log", str(DATA / "logs/plain.log"), "--atl-src", "/nonexistent"]) == 1

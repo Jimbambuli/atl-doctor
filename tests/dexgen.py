@@ -111,7 +111,7 @@ def make_dex(classes: list[dict]) -> bytes:
         ms = []
         for mth in c.get("methods", []):
             midx = pool.m(c["name"], mth["name"], mth["proto"])
-            units = [u for i in mth.get("code", []) + [("return-void",)] for u in _encode_insn(pool, i)]
+            units = [u for i in mth.get("code", []) + ([] if mth.get("exact") else [("return-void",)]) for u in _encode_insn(pool, i)]
             ms.append((midx, units))
         prepared.append((cidx, sidx, ifs, fl, sorted(ms)))
     # layout

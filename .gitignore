@@ -3,3 +3,4 @@ docs/superpowers/
 build/
 __pycache__/
 *.egg-info/
+!tests/data/aosp-*/build/

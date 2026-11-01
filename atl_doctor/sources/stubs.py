@@ -160,17 +160,24 @@ def _params(p: str) -> list[str]:
     return [_simple(re.sub(r"\s+\w+\s*((\[\])*)$", r"\1", x.strip())) for x in parts]
 
 
-def java_methods(root: Path, rel: str) -> Iterator[tuple[str, str, str, list[str], int, str]]:
-    """yield (kind, class, method, simple param types, line, stub-text comment) for stub-like methods of one file"""
-    src = (root / rel).read_text(encoding="utf-8", errors="replace")
-    m, comments = mask(src)
+@dataclass(frozen=True)
+class MethodSpan:
+    """One method declaration found by `walk_methods` (offsets into the masked source)."""
+    cls: str          # package + Outer$Inner
+    name: str         # "<init>" for constructors
+    params: str       # raw parameter list
+    head: int         # first non-blank character of the declaration (annotations included)
+    open: int         # "{" of the body, -1 for native methods
+    close: int        # "}" of the body, ";" for native methods
+    last: int         # end of the previous statement/member (comments in last..head belong to the method)
+    ctor: bool
+    native: bool
+
+
+def walk_methods(m: str) -> Iterator[MethodSpan]:
+    """Every method with a body and every native method of one masked Java source (see `mask`)."""
     pkg_m = re.search(r"^\s*package\s+([\w.]+)\s*;", m, re.M)
     pkg = pkg_m.group(1) + "." if pkg_m else ""
-    lines = [0] + [k + 1 for k, ch in enumerate(src) if ch == "\n"]
-
-    def ln(o: int) -> int:
-        return bisect.bisect_right(lines, o)
-
     stack: list[tuple[str, str, int]] = []  # (type|anon|block, name, close)
     last = 0
     k = 0
@@ -184,7 +191,8 @@ def java_methods(root: Path, rel: str) -> Iterator[tuple[str, str, str, list[str
                 nm = _NATIVE_RE.search(hd)
                 if nm:
                     cls = pkg + "$".join(s[1] for s in stack)
-                    yield ("native", cls, nm.group(1), _params(nm.group(2)), ln(last + len(m[last:k]) - len(m[last:k].lstrip())), "")
+                    yield MethodSpan(cls, nm.group(1), nm.group(2), last + len(m[last:k]) - len(m[last:k].lstrip()),
+                                     -1, k, last, False, True)
             last = k + 1
         elif ch == "{":
             hd = m[last:k]
@@ -203,12 +211,8 @@ def java_methods(root: Path, rel: str) -> Iterator[tuple[str, str, str, list[str
                 head_wo = hds[:mm.start()]
                 ctor = name == stack[-1][1] and not re.search(
                     r"\w", re.sub(r"\b(public|protected|private|static|final|synchronized|@\w+(\([^)]*\))?)\b", "", head_wo))
-                kd = kind_of(m[k + 1:close], src[k + 1:close], ctor)
-                if kd:
-                    com = "".join(c for o, c in comments if k < o < close)
-                    note = re.sub(r"\s+", " ", com).strip()[:120] if STUBTEXT.search(com) else ""
-                    yield (kd, cls, "<init>" if ctor else name, _params(mm.group(2)),
-                           ln(last + len(hd) - len(hd.lstrip())), note)
+                yield MethodSpan(cls, "<init>" if ctor else name, mm.group(2), last + len(hd) - len(hd.lstrip()),
+                                 k, close, last, ctor, False)
                 stack.append(("block", name, close))
             elif re.search(r"\bnew\s+[\w.<>]+\s*\((?:[^()]|\([^()]*\))*\)\s*$", hds) or (tm and not in_type):
                 stack.append(("anon", "?", close))
@@ -216,6 +220,23 @@ def java_methods(root: Path, rel: str) -> Iterator[tuple[str, str, str, list[str
                 stack.append(("block", "", close))
             last = k + 1
         k += 1
+
+
+def java_methods(root: Path, rel: str) -> Iterator[tuple[str, str, str, list[str], int, str]]:
+    """yield (kind, class, method, simple param types, line, stub-text comment) for stub-like methods of one file"""
+    src = (root / rel).read_text(encoding="utf-8", errors="replace")
+    m, comments = mask(src)
+    lines = [0] + [k + 1 for k, ch in enumerate(src) if ch == "\n"]
+    for s in walk_methods(m):
+        line = bisect.bisect_right(lines, s.head)
+        if s.native:
+            yield ("native", s.cls, s.name, _params(s.params), line, "")
+            continue
+        kd = kind_of(m[s.open + 1:s.close], src[s.open + 1:s.close], s.ctor)
+        if kd:
+            com = "".join(c for o, c in comments if s.open < o < s.close)
+            note = re.sub(r"\s+", " ", com).strip()[:120] if STUBTEXT.search(com) else ""
+            yield (kd, s.cls, s.name, _params(s.params), line, note)
 
 
 # ---------------------------------------------------------------- C side

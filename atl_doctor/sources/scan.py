@@ -12,7 +12,7 @@ from ..env import atl_jars, libcore_jars, resolve
 from ..errors import DoctorError, PrerequisiteMissing, UsageError
 from ..findings import Finding, Klass, Occurrence, merge, to_dict
 from .dex import ApkInfo, Ref, World, read_apk, framework_refs, result_used_refs
-from .stubs import STUB_KINDS, StubEntry, build_stub_list, stub_finding
+from .stubs import STUB_KINDS, StubEntry, build_stub_list, stub_finding, stub_index
 
 COMPOSE_MIN = 100
 GMS_PREFIXES = ("com.google.android.gms.", "com.google.firebase.", "com.google.android.play.",
@@ -207,7 +207,10 @@ def _run_scan(args: argparse.Namespace) -> int:
     if args.compare_src:
         states.append(_compare_state(Path(args.compare_src), core))
     rep = scan_many([Path(a) for a in args.apks], states, args.sdk_int)
-    from ..report import render_text
+    from ..report import apply_aosp, needs_aosp, render_text
+
+    if needs_aosp(rep) or resolve(args.aosp, "ATL_DOCTOR_AOSP"):
+        apply_aosp(rep, args.aosp, str(prefix), stub_index(states[0].stubs), states[0].world)
 
     text = render_text(rep)
     if args.output:
@@ -226,6 +229,8 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--atl-src", metavar="DIR", help="ATL source tree (default: $ATL_DOCTOR_ATL_SRC)")
     p.add_argument("--prefix", metavar="DIR", help="ATL installation prefix (default: $ATL_DOCTOR_PREFIX)")
     p.add_argument("--compare-src", metavar="DIR", help="second ATL source tree (with build*/api-impl.jar) to compare")
+    p.add_argument("--aosp", metavar="DIR", help="AOSP source tree (root or frameworks/base) to compare stubs and "
+                                                 "missing methods with (default: $ATL_DOCTOR_AOSP)")
     p.add_argument("--sdk-int", type=int, metavar="N", help="SDK_INT ATL reports (default: the app's minSdk, at least 9)")
     p.add_argument("apks", nargs="+", metavar="APK")
     p.set_defaults(func=_run_scan)

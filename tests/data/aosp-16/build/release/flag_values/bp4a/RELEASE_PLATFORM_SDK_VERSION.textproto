@@ -1,0 +1,5 @@
+# synthetic test data for atl-doctor (not AOSP code)
+name: "RELEASE_PLATFORM_SDK_VERSION"
+value: {
+  string_value: "36"
+}

@@ -1,3 +1,5 @@
 Test data is generated at run time by tests/dexgen.py.
 capture-atl/ is a hand-written synthetic capture (no app data); agent-run1/2.tsv are synthetic agent outputs of
 the same causes with different numbers, hashes and lambda indices.
+aosp-14/ and aosp-16/ are synthetic mini AOSP trees (no AOSP code): version files for SDK 34 (version_defaults.mk)
+and 36 (release flag textproto, Build.java) and a few hand-written framework classes for the AOSP comparison.

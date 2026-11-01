@@ -53,6 +53,11 @@ def finding_lines(f: Finding) -> list[str]:
     lines = [f"{f.short_id}  {f.weight:>3}  {f.title}  [{f.total_count}x, first: {first}]"]
     if f.suggestion:
         lines.append(f"    -> {f.suggestion}")
+    from .sources.aosp import aosp_line
+
+    a = aosp_line(f)
+    if a:
+        lines.append(f"    {a}")
     return lines
 
 
@@ -198,7 +203,11 @@ def _image_tags(f: Finding, capture_dir: Path | None) -> list[str]:
 def _html_finding(f: Finding, capture_dir: Path | None) -> str:
     occ = "".join(f"<li>{_e(o.phase)} ({_e(o.side)}): {o.count}x{' - ' + _e(o.where) if o.where else ''}</li>"
                   for o in f.occurrences)
+    from .sources.aosp import aosp_line
+
     sugg = f"<p>{_e(f.suggestion)}</p>" if f.suggestion else ""
+    a = aosp_line(f)
+    sugg += f"<p>{_e(a)}</p>" if a else ""
     det = f"<pre>{_e(json.dumps(f.details, indent=2, sort_keys=True, ensure_ascii=False))}</pre>" if f.details else ""
     return (f'<details id="{_e(f.short_id)}"><summary><span class="w">{f.weight}</span> {_e(f.title)} '
             f'<span class="m">{_e(f.short_id)} [{f.total_count}x]</span></summary>'
@@ -269,12 +278,60 @@ def _run_report(args: argparse.Namespace) -> int:
     res = parse_logs([Path(p) for p in args.log])
     findings = res.findings
     atl_src = resolve(args.atl_src, "ATL_DOCTOR_ATL_SRC")
-    if atl_src:
-        from .sources.stubs import build_stub_list, match_log_stubs
+    from .sources.stubs import build_stub_list, match_log_stubs, stub_index
 
-        findings = match_log_stubs(findings, build_stub_list(Path(atl_src), []))
+    entries = build_stub_list(Path(atl_src), []) if atl_src else []
+    if atl_src:
+        findings = match_log_stubs(findings, entries)
     env = {k: res.header[k] for k in ENV_KEYS if k in res.header}
-    return _emit(args, Report("log", env, [], res.phases, findings), None)
+    r = Report("log", env, [], res.phases, findings)
+    if needs_aosp(r) or resolve(args.aosp, "ATL_DOCTOR_AOSP"):
+        apply_aosp(r, args.aosp, None, stub_index(entries))
+    return _emit(args, r, None)
+
+
+def needs_aosp(r: Report) -> bool:
+    return any(f.kind in ("stub", "missing") and "#" in f.key for f in r.findings)
+
+
+def _prefix_world(prefix: str | None):
+    """Class world of the ATL jars under prefix (or $ATL_DOCTOR_PREFIX); None if there are none."""
+    from .env import atl_jars
+    from .sources.dex import World
+
+    jars = atl_jars(Path(prefix)) if prefix else []
+    if not jars and resolve(None, "ATL_DOCTOR_PREFIX"):
+        jars = atl_jars(Path(resolve(None, "ATL_DOCTOR_PREFIX")))
+    return World.from_jars(jars) if jars else None
+
+
+def apply_aosp(r: Report, aosp: str | None, prefix: str | None, stubs: dict, world=None) -> None:
+    """AOSP comparison for the stub/missing findings of r; the detected version goes into the environment."""
+    from .sources.aosp import attach_aosp, open_aosp
+
+    path = resolve(aosp, "ATL_DOCTOR_AOSP")
+    if not path:
+        r.environment["aosp"] = "not given (use --aosp DIR)"
+        return
+    tree = open_aosp(Path(path))
+    world = world or _prefix_world(prefix)
+    attach_aosp(r.findings, tree, world, stubs)
+    r.environment["aosp"] = str(path)
+    r.environment["aosp_sdk"] = str(tree.sdk) if tree.sdk else "unknown"
+    if world is None:
+        r.environment["aosp_deps"] = "not checked against ATL (no ATL jars; recorded prefix or $ATL_DOCTOR_PREFIX)"
+
+
+def _apply_capture_aosp(r: Report, root: Path, aosp: str | None) -> None:
+    from .capture import TRACE_DIR, Capture
+    from .sources.stubs import load_stub_tsv, stub_index
+
+    if not needs_aosp(r) and not resolve(aosp, "ATL_DOCTOR_AOSP"):
+        return
+    cap = Capture.open(root)
+    tsv = cap.path(TRACE_DIR) / "stubs.tsv"
+    stubs = stub_index(load_stub_tsv(tsv)) if tsv.is_file() else {}
+    apply_aosp(r, aosp, cap.read_manifest().environment.get("prefix"), stubs)
 
 
 def build_capture_report(path: Path) -> tuple[Report, Path]:
@@ -373,6 +430,7 @@ def _report_capture(args: argparse.Namespace) -> int:
         r, root = build_pair_report(Path(args.dirs[0]), Path(args.dirs[1]), args.density)
     else:
         r, root = build_capture_report(Path(args.dirs[0]))
+    _apply_capture_aosp(r, root, args.aosp)
     return _emit(args, r, root)
 
 
@@ -394,6 +452,19 @@ def render_explain(f: Finding, r: Report, capture_dir: Path | None) -> str:
     images = f.details.get("images", [])
     if images and capture_dir:
         out += ["", "images:"] + [f"  {capture_dir / i}" for i in images]
+    a = f.details.get("aosp")
+    if "aosp" in f.details:
+        out += ["", f"AOSP comparison (SDK {f.details.get('aosp_sdk') or 'unknown'}):"]
+        if not a:
+            out.append("  not found in the AOSP tree")
+        else:
+            out += [f"  verdict: {a['verdict']}", f"  file: {a['file']}:{a['lines'][0]}-{a['lines'][1]}"
+                    f" ({a['size_lines']} lines{', ' + str(a['overloads']) + ' overloads' if a['overloads'] > 1 else ''})"]
+            out += [f"  missing in ATL: {d}" for d in a["deps_missing"]] + [f"  stub in ATL: {d}" for d in a["deps_stub"]]
+            if not a.get("deps_checked", True):
+                out.append("  dependencies not checked against ATL (no ATL jars)")
+            if a["markers"]:
+                out.append("  markers: " + ", ".join(a["markers"]))
     crops = f.details.get("crops")
     if crops and capture_dir:
         out += ["", "crops (ATL, Android):"] + [f"  {capture_dir / crops[k]}" for k in ("atl", "android") if k in crops]
@@ -419,6 +490,12 @@ def _run_explain(args: argparse.Namespace) -> int:
         if str(e).startswith("ambiguous"):
             raise UsageError(str(e)) from e
         raise DoctorError("no finding matches ID" + f" {args.id}") from e
+    if resolve(args.aosp, "ATL_DOCTOR_AOSP") and f.kind in ("stub", "missing") and "#" in f.key:
+        one = Report(r.mode, {}, [], [], [f])
+        if root:
+            _apply_capture_aosp(one, root, args.aosp)
+        else:
+            apply_aosp(one, args.aosp, None, {})
     sys.stdout.write(render_explain(f, r, root))
     return 0
 
@@ -434,6 +511,8 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--log", action="append", metavar="FILE", help="log mode: one log file per phase (repeatable)")
     p.add_argument("--atl-src", metavar="DIR", help="ATL source tree; match logged stub messages against its stub list "
                                                     "(default: $ATL_DOCTOR_ATL_SRC)")
+    p.add_argument("--aosp", metavar="DIR", help="AOSP source tree (root or frameworks/base) to compare stubs and "
+                                                 "missing methods with (default: $ATL_DOCTOR_AOSP)")
     p.add_argument("--density", type=float, metavar="D",
                    help="Android display density (dp scale) for the tree comparison (default: from the Android capture)")
     p.add_argument("dirs", nargs="*", metavar="DIR", help="capture directory [and Android capture directory]")
@@ -441,6 +520,6 @@ def register(sub: argparse._SubParsersAction) -> None:
 
     e = sub.add_parser("explain", help="show everything known about one finding", parents=[common_parser()])
     e.add_argument("-d", "--dir", metavar="DIR", help="capture directory or JSON report")
-    e.add_argument("--aosp", metavar="DIR", help="AOSP tree (reserved for the AOSP comparison; not used yet)")
+    e.add_argument("--aosp", metavar="DIR", help="AOSP source tree (root or frameworks/base; default: $ATL_DOCTOR_AOSP)")
     e.add_argument("id", metavar="ID", help="full ID, short ID or unique short-ID prefix")
     e.set_defaults(func=_run_explain)

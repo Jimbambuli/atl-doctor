@@ -33,6 +33,13 @@ def test_comments_and_strings_do_not_confuse_scanner():
     e = {(x.cls, x.method): x for x in entries()}
     assert ("android.graphics.drawable.Drawable", "tricky") not in e       # "}" in string, /* { */ in comment
     assert e[("android.graphics.drawable.Drawable", "doNothing")].kind == "empty"
+
+
+def test_returning_a_parameter_unchanged_is_a_stub():
+    # placeholder like ATL's old Drawable.parseBlendMode: `return defaultMode;` ignores the value to parse
+    e = {(x.cls, x.method): x for x in entries()}
+    assert e[("android.graphics.drawable.Drawable", "pickMode")].kind == "returnsarg"
+    assert ("android.graphics.drawable.Drawable", "getAlpha") not in e     # returning a field is real code
     assert "TODO" in e[("android.graphics.drawable.Drawable", "doNothing")].comment
     assert ("android.graphics.drawable.Drawable", "setAlpha") not in e
 

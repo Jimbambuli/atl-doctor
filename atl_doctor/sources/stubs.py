@@ -7,6 +7,7 @@ methods of anonymous/local classes skipped).  Body kinds:
 
   empty        void without any statement      empty0      only return null/false/0/empty array or collection
   emptythis    only `return this`              const       only return <literal or CONSTANT>
+  returnsarg   only `return <parameter>` (the input comes back unchanged, e.g. a default value)
   throws       throws UnsupportedOperationException, or throws with stub text (short body)
   logs         string literal with stub/not implemented/unimplemented/TODO/FIXME (short body)
   throws-part / logs-part   the same in one branch of a longer body (method otherwise implemented)
@@ -31,9 +32,9 @@ from ..errors import DoctorError
 from ..findings import Finding, Klass, Occurrence, merge
 from .dex import SIZE, Dex
 
-STUB_KINDS = {"empty", "empty0", "emptythis", "const", "throws", "logs", "throws-part", "logs-part",
+STUB_KINDS = {"empty", "empty0", "emptythis", "const", "returnsarg", "throws", "logs", "throws-part", "logs-part",
               "native-empty", "native-empty0", "native-const", "native-logs", "native-missing"}
-RESULT_KINDS = {"empty0", "emptythis", "const", "native-empty0", "native-const"}
+RESULT_KINDS = {"empty0", "emptythis", "const", "returnsarg", "native-empty0", "native-const"}
 
 STUBTEXT = re.compile(r"stub|not implemented|unimplemented|\btodo\b|fixme", re.I)
 _KIND_NAMES = {"leer": "empty", "leer0": "empty0", "leerthis": "emptythis", "konst": "const", "wirft": "throws",
@@ -109,7 +110,7 @@ def match_brace(m: str, o: int) -> int:
     return len(m) - 1
 
 
-def kind_of(body_m: str, body_raw: str, ctor: bool) -> str | None:
+def kind_of(body_m: str, body_raw: str, ctor: bool, params: str = "") -> str | None:
     b = re.sub(r"\s+", " ", body_m).strip()
     stubtext = any(STUBTEXT.search(s) for s in re.findall(r'"((?:[^"\\\n]|\\.)*)"', body_raw))
     short = b.count(";") <= 3 and not re.search(r"\b(for|while|switch)\b", b)  # else one branch of a longer body
@@ -125,6 +126,10 @@ def kind_of(body_m: str, body_raw: str, ctor: bool) -> str | None:
         return "emptythis"
     if re.fullmatch(r"return\s*\(?\s*" + _CONST + r"\s*\)?\s*;", b):
         return "const"
+    names = re.findall(r"(\w+)\s*(?:\[\s*\])*\s*(?:,|$)", params.strip())
+    r = re.fullmatch(r"return\s*\(?\s*(\w+)\s*\)?\s*;", b)
+    if r and r.group(1) in names:
+        return "returnsarg"
     return None
 
 
@@ -232,7 +237,7 @@ def java_methods(root: Path, rel: str) -> Iterator[tuple[str, str, str, list[str
         if s.native:
             yield ("native", s.cls, s.name, _params(s.params), line, "")
             continue
-        kd = kind_of(m[s.open + 1:s.close], src[s.open + 1:s.close], s.ctor)
+        kd = kind_of(m[s.open + 1:s.close], src[s.open + 1:s.close], s.ctor, s.params)
         if kd:
             com = "".join(c for o, c in comments if s.open < o < s.close)
             note = re.sub(r"\s+", " ", com).strip()[:120] if STUBTEXT.search(com) else ""

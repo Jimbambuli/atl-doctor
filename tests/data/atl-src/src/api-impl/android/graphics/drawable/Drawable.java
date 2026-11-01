@@ -19,4 +19,12 @@ public class Drawable {
 	public void doNothing() {
 		// TODO nothing here
 	}
+
+	public static int pickMode(int value, int defaultMode) {
+		return defaultMode;
+	}
+
+	public int getAlpha() {
+		return alpha;
+	}
 }

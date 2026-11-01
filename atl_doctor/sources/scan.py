@@ -24,7 +24,7 @@ LIBCORE_PREFIXES = ("java.", "javax.", "dalvik.", "libcore.", "sun.", "org.json.
 ATL_MIN_SDK_INT = 9
 # Stub kinds that count as "stub" in the coverage: bodies that do nothing useful.  `const` and the
 # `-part` kinds are mostly real implementations; `native-missing` is a link problem, not a stub.
-COUNTED_STUB_KINDS = STUB_KINDS - {"const", "throws-part", "logs-part", "native-missing"}
+COUNTED_STUB_KINDS = STUB_KINDS - {"const", "returnsarg", "throws-part", "logs-part", "native-missing"}
 LIMITS = ["Reflection is only detected through string constants.",
           "Referenced does not mean called at runtime."]
 EXCL_GMS = "Google Play Services/Firebase"

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import io
+import time
 
 import pytest
 
@@ -193,3 +194,59 @@ def test_atl_driver_type_splits_long_text_and_refuses_4_byte_characters(tmp_path
     assert all(len(s.encode()) <= 405 for s in sent) and "".join(s[5:] for s in sent) == text
     with pytest.raises(DoctorError, match="U\\+1F600"):
         d.type_text("ok \U0001F600")
+
+
+class _WatchSession(_Session):
+    """Session that saw the window appear 1.9 s ago (window_events as the KWin watch script delivers them)."""
+
+    def __init__(self, t_us):
+        self.t_us, self.placed = t_us, 0
+
+    def window_events(self):
+        return [{"t_us": self.t_us, "caption": "Demo", "resource_class": "org.example.demo", "kind": "normal"}]
+
+    def place_window_at_origin(self):
+        self.placed += 1
+
+
+def test_wait_window_reports_the_event_time_not_the_time_of_the_query(tmp_path):
+    from atl_doctor.capture import Capture, now_us
+    from atl_doctor.steps import AtlDriver
+
+    seen = now_us()[0] - 1_900_000
+    d = AtlDriver(Capture.create(tmp_path / "c", "atl"), _WatchSession(seen), tmp_path / "fifo", tmp_path / "st",
+                  has_tree=False, frames=False)
+    assert d.wait_window("org.example.demo", 5) and d.event_us == seen
+    assert d.session.placed == 1
+    assert d.wait_window("nothing", 0.1) is False and d.event_us is None
+
+
+def test_wait_window_step_ends_at_the_event_time():
+    from atl_doctor.capture import now_us
+
+    class D(FakeDriver):
+        def wait_window(self, m, t):
+            self.event_us = now_us()[0] + 100_000 if m == "later" else now_us()[0] - 1_900_000
+            time.sleep(0.3)             # the query returns well after the window appeared
+            return True
+
+    for m in ("later", "earlier"):
+        d, out = D(), io.StringIO()
+        run_steps(parse_steps(f"wait-window {m} 5", "s"), d, "s", io.StringIO(), out)
+        row = out.getvalue().split("\t")
+        t0, t1 = int(row[4]), int(row[5])
+        # step end = event time; an event from before the step began ends the step where it began
+        assert t1 == (d.event_us if m == "later" else t0)
+
+
+def test_wait_window_without_a_watch_polls_the_windows(tmp_path):
+    from atl_doctor.capture import Capture
+    from atl_doctor.steps import AtlDriver
+
+    class S(_WatchSession):
+        def window_events(self):
+            return None
+
+    d = AtlDriver(Capture.create(tmp_path / "c", "atl"), S(0), tmp_path / "fifo", tmp_path / "st",
+                  has_tree=False, frames=False)
+    assert d.wait_window("Demo", 5) and d.event_us is None and d.session.placed == 1

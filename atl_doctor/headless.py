@@ -22,6 +22,7 @@ START_TIMEOUT_S = 20.0
 SCRIPT_WAIT_S = 0.5
 SOCKET_PATH_MAX = 100
 _TAG = "ATLDOC"
+_WATCH_TAG = "ATLWATCH"
 # windows of the app: normal windows, dialogs and popups (KWin's own windows are none of these)
 _APP_WINDOW = "(w.normalWindow || w.dialog || w.popupWindow)"
 
@@ -41,6 +42,9 @@ class HeadlessSession:
         self.bus = ""
         self._n = 0
         self._script_lock = threading.Lock()  # mark screenshots run beside the step driver
+        self._watching = False
+        self._events: list[dict] = []
+        self._events_pos = 0
 
     @staticmethod
     def missing() -> str | None:
@@ -77,6 +81,7 @@ class HeadlessSession:
             if (self.run_dir / self.socket).exists() and bus_file.is_file() and bus_file.read_text().strip():
                 self.bus = bus_file.read_text().strip()
                 time.sleep(1.0)  # KWin finishes its own setup after creating the socket
+                self._start_watch()
                 return
             if self.proc.poll() is not None:
                 break
@@ -125,6 +130,55 @@ class HeadlessSession:
             if i >= 0:
                 out.append(line[i + len(_TAG) + 5:])
         return out
+
+    def _start_watch(self) -> None:
+        """Load a KWin script that stays: it prints a line, stamped with KWin's own clock, whenever an app window
+        appears or changes its title or class. window_events() reads them, so a window is dated by when it came,
+        not by when a query noticed it (a query is a script run of SCRIPT_WAIT_S)."""
+        js = (f"function say(w) {{ if (!{_APP_WINDOW}) return; "
+              f"print('{_WATCH_TAG}\\t' + [Date.now(), w.dialog ? 'dialog' : w.popupWindow ? 'popup' : 'normal', "
+              f"String(w.caption).replace(/[\\t\\r\\n]+/g, ' '), String(w.resourceClass)].join('\\t')); }} "
+              f"function hook(w) {{ say(w); w.captionChanged.connect(() => say(w)); "
+              f"w.windowClassChanged.connect(() => say(w)); }} "
+              f"for (const w of workspace.stackingOrder) hook(w); workspace.windowAdded.connect(hook);")
+        path = self.run_dir / "script-watch.js"
+        path.write_text(js, encoding="utf-8")
+        env = {**os.environ, **self.env()}
+        try:
+            r = subprocess.run(["gdbus", "call", "--session", "-d", "org.kde.KWin", "-o", "/Scripting", "-m",
+                                "org.kde.kwin.Scripting.loadScript", str(path), "atldocwatch"],
+                               env=env, capture_output=True, timeout=10)
+            subprocess.run(["gdbus", "call", "--session", "-d", "org.kde.KWin", "-o", "/Scripting", "-m",
+                            "org.kde.kwin.Scripting.start"], env=env, capture_output=True, timeout=10)
+            self._watching = r.returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            self._watching = False  # window_events() says None, the driver queries as before
+
+    def window_events(self) -> list[dict] | None:
+        """Window appearances and title/class changes so far, oldest first: t_us (CLOCK_BOOTTIME, as in
+        capture.now_us), caption, resource_class, kind. None without a watch script (then only windows())."""
+        if not self._watching:
+            return None
+        try:
+            with open(self.log, "rb") as f:
+                f.seek(self._events_pos)
+                new = f.read()
+        except OSError:
+            return self._events
+        nl = new.rfind(b"\n") + 1   # only whole lines
+        self._events_pos += nl
+        from .capture import now_us
+        boot, epoch = now_us()
+        for line in new[:nl].decode("utf-8", "replace").splitlines():
+            i = line.find(f"js: {_WATCH_TAG}\t")
+            f = line[i + len(_WATCH_TAG) + 5:].split("\t") if i >= 0 else []
+            if len(f) == 4:
+                try:
+                    t_us = int(float(f[0]) * 1000) - epoch + boot
+                except ValueError:
+                    continue
+                self._events.append({"t_us": t_us, "kind": f[1], "caption": f[2], "resource_class": f[3]})
+        return self._events
 
     def windows(self) -> list[dict]:
         """App windows bottom to top: caption, resource class, kind, frame geometry (x, y, w, h) and the origin

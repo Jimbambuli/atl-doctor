@@ -88,6 +88,8 @@ Run ATL in a private invisible KWin session (kwin_wayland \-\-virtual); needed f
 .BI \-\-steps " FILE"
 Drive the app with a step file. Implies \fB\-\-headless\fR under ATL.
 Per step the capture records the time, the number of frames drawn and the distance scrolled (\fIsteps.tsv\fR).
+A \fBwait\-window\fR step ends in \fIsteps.tsv\fR at the time the window appeared (under ATL, from KWin's own clock),
+not when the step noticed it.
 .TP
 .B \-\-no\-trace
 No method trace. The trace slows the app down many times over (a first start can take minutes); without it

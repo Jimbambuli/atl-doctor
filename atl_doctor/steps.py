@@ -219,7 +219,7 @@ class Driver(Protocol):
     def scroll_smooth(self, dy: int) -> None: ...
     def screenshot(self, name: str) -> None: ...
     def wait_idle(self, timeout_s: float) -> bool: ...
-    def wait_window(self, match: str, timeout_s: float) -> bool: ...
+    def wait_window(self, match: str, timeout_s: float) -> bool: ...  # may set event_us: when the window appeared
     def mark(self, name: str) -> None: ...
 
 
@@ -316,6 +316,8 @@ def run_steps(steps: list[Step | Repeat], driver: Driver, filename: str, log: Te
         if data is not None:
             frames, scroll = probe.after(s, tree)
             t1 = now_us()[0]
+            if s.cmd == "wait-window" and getattr(driver, "event_us", None) is not None:
+                t1 = max(t0, driver.event_us)  # the window's time, not the time the query returned
             desc = re.sub(r"[\t\r\n]", " ", _describe(s))
             data.write("\t".join([str(_state["n"]), str(s.line), s.cmd, desc, str(t0), str(t1),
                                   "" if frames is None else str(frames),
@@ -368,6 +370,8 @@ def _run_one(s: Step, d: Driver, filename: str) -> None:
 IDLE_QUIET_S = 0.6        # no new frame for this long = idle
 IDLE_FALLBACK_S = 2.0     # without frame times: fixed pause
 INPUT_SYNC_S = 15.0
+WINDOW_POLL_S = 0.02      # wait-window: how often the watch script's events are read
+WINDOW_QUERY_S = 2.0      # wait-window: how often the windows are asked for as well
 
 
 class AtlDriver:
@@ -387,6 +391,7 @@ class AtlDriver:
         self._status_pos = 0
         self._n_tree = 0
         self._warned_idle = False
+        self.event_us: int | None = None  # when the window of the last wait-window appeared (CLOCK_BOOTTIME)
 
     # --- input helper
     def _send(self, line: str) -> None:
@@ -551,14 +556,28 @@ class AtlDriver:
             time.sleep(0.1)
         return False
 
+    def _is_match(self, match: str, w: dict) -> bool:
+        return match == self.package or match in w["caption"] or match in w["resource_class"]
+
     def wait_window(self, match: str, timeout_s: float) -> bool:
+        """Wait for a window; event_us is the time it appeared (the KWin watch script's stamp), not the time
+        of the query that found it. Without a watch the windows are polled and event_us stays None."""
+        self.event_us = None
         end = time.monotonic() + timeout_s
+        next_query = time.monotonic() + WINDOW_QUERY_S
         while time.monotonic() < end:
-            ws = self.session.windows()
-            if any(match in w["caption"] or match in w["resource_class"] for w in ws) or (ws and match == self.package):
+            events = self.session.window_events()
+            hit = next((e for e in events or [] if self._is_match(match, e)), None)
+            if hit is not None:
+                self.event_us = hit["t_us"]
+            elif events is None or time.monotonic() >= next_query:
+                # no watch, or a watch that saw nothing for a while: ask KWin directly
+                next_query = time.monotonic() + WINDOW_QUERY_S
+                hit = next((w for w in self.session.windows() if self._is_match(match, w)), None)
+            if hit is not None:
                 self.session.place_window_at_origin()
                 return True
-            time.sleep(0.5)
+            time.sleep(WINDOW_POLL_S)
         return False
 
     def mark(self, name: str) -> None:

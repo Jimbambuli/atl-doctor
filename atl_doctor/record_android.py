@@ -95,10 +95,12 @@ def _android_agent(adb: Adb, prefix: Path | None, abi: str | None, rooted: bool)
     return lib, wrap, ""
 
 
-def _install_agent(adb: Adb, package: str, lib: Path, wrap: Path) -> None:
+def _install_agent(adb: Adb, package: str, lib: Path, wrap: Path) -> bool:
+    """Push the agent and set the wrap property; True if SELinux was enforcing (to be restored at the end)."""
     data = f"/data/data/{package}"
     opts = f",arm={data}/atl-doctor-armed,marks={data}/atl-doctor-marks.tsv"
     text = wrap.read_text(encoding="utf-8").replace("@OPTS@", opts).replace("@PACKAGE@", package)
+    enforcing = adb.shell("getenforce").strip() == "Enforcing"
     adb.shell("setenforce", "0")
     adb.shell("mkdir", "-p", DEVICE_DIR)
     adb.run("push", str(lib), f"{DEVICE_DIR}/agent.so")
@@ -112,6 +114,7 @@ def _install_agent(adb: Adb, package: str, lib: Path, wrap: Path) -> None:
     adb.shell("chmod", "644", f"{DEVICE_DIR}/agent.so")
     adb.shell("rm", "-f", f"{data}/atl-doctor-agent.tsv", f"{data}/atl-doctor-armed", f"{data}/atl-doctor-marks.tsv")
     adb.shell("setprop", f"wrap.{package}", f"{DEVICE_DIR}/wrap.sh")
+    return enforcing
 
 
 def _tree(adb: Adb, cap: Capture, mark: Mark) -> None:
@@ -187,8 +190,7 @@ def record_android(opts: RecordOptions) -> int:
     cap.path(TREES).mkdir()
 
     adb.shell("am", "force-stop", pkg)
-    if lib and wrap:
-        _install_agent(adb, pkg, lib, wrap)
+    enforcing = bool(lib and wrap) and _install_agent(adb, pkg, lib, wrap)
     os.mkfifo(cap.path(CONTROL))
     ctl = os.open(cap.path(CONTROL), os.O_RDONLY | os.O_NONBLOCK)
     keep = os.open(cap.path(CONTROL), os.O_WRONLY)
@@ -222,7 +224,8 @@ def record_android(opts: RecordOptions) -> int:
     try:
         with stop, open(cap.path(LOGCAT_RAW), "wb") as raw:
             logcat = subprocess.Popen(["adb", "-s", serial, "logcat", "-v", "threadtime"], stdout=raw,
-                                      stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+                                      stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                                      start_new_session=True)  # Ctrl-C must not cut off the last log lines
             try:
                 adb.run(*m.command[3:])
                 started = time.monotonic()
@@ -271,7 +274,8 @@ def record_android(opts: RecordOptions) -> int:
     finally:
         if lib:
             adb.shell("setprop", f"wrap.{pkg}", '""')
-            adb.shell("setenforce", "1")
+            if enforcing:
+                adb.shell("setenforce", "1")
         os.close(keep)
         os.close(ctl)
 

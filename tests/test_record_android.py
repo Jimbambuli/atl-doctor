@@ -254,3 +254,18 @@ def test_android_scroll_notches_and_smooth(adb, apk, tmp_path):
     assert len(sw) == 3                        # one gesture per notch, one for the smooth scroll
     dist = [int(s[4]) - int(s[6]) for s in sw]  # y1 - y2
     assert dist[0] == dist[1] > 0 and dist[2] == -2 * dist[0]   # 64 dp per notch, -128 dp smooth
+
+
+@pytest.mark.parametrize("before,restored", [("Enforcing", True), ("Permissive", False)])
+def test_selinux_mode_is_restored_not_forced(adb, apk, tmp_path, before, restored):
+    table(adb)
+    t = json.loads((adb / "table.json").read_text())
+    t["shell getenforce"] = [before + "\n", 0]
+    (adb / "table.json").write_text(json.dumps(t))
+    agent_dir = tmp_path / "home/.local/lib/atl-doctor"
+    agent_dir.mkdir(parents=True)
+    (agent_dir / "libatl_doctor_agent-android-x86_64.so").write_bytes(b"\x7fELF")
+    assert _run_with_mark(adb, apk, tmp_path / "c") == 0
+    c = calls(adb)
+    assert "shell setenforce 0" in c
+    assert ("shell setenforce 1" in c) == restored

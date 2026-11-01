@@ -272,15 +272,13 @@ def _run_report(args: argparse.Namespace) -> int:
     return _emit(args, Report("log", env, [], res.phases, findings), None)
 
 
-def _report_capture(args: argparse.Namespace) -> int:
+def build_capture_report(path: Path) -> tuple[Report, Path]:
     from .capture import TRACE_DIR, Capture
     from .sources import load_capture_findings
     from .sources.dex import read_apk, result_used_refs
     from .sources.stubs import load_stub_tsv
 
-    if len(args.dirs) > 1:
-        raise DoctorError("comparing with an Android capture is not available yet")
-    cap = Capture.open(Path(args.dirs[0]))
+    cap = Capture.open(path)
     m = cap.read_manifest()
     stubs = cap.path(TRACE_DIR) / "stubs.tsv"
     entries = load_stub_tsv(stubs) if stubs.is_file() else None
@@ -296,7 +294,58 @@ def _report_capture(args: argparse.Namespace) -> int:
             env["apk"] = f"{m.apk} (unreadable, stub results not checked: {e})"
     phases, findings = load_capture_findings(cap, entries, used)
     probes = [Probe(p["name"], p["available"], p.get("reason", ""), p.get("hint", "")) for p in m.probes]
-    return _emit(args, Report("record", env, probes, phases, findings), cap.root)
+    return Report("record", env, probes, phases, findings), cap.root
+
+
+def _report_capture(args: argparse.Namespace) -> int:
+    if len(args.dirs) > 1:
+        raise DoctorError("comparing with an Android capture is not available yet")
+    r, root = build_capture_report(Path(args.dirs[0]))
+    return _emit(args, r, root)
+
+
+def render_explain(f: Finding, r: Report, capture_dir: Path | None) -> str:
+    first = [f"{f.id}  ({f.short_id})", f.title, "",
+             f"class: {f.klass}  weight: {f.weight} (class rank {RANK[f.klass]}"
+             f"{', minus 5 for Android' if f.on_android else ''})  seen: {f.total_count}x"]
+    if f.suggestion:
+        first += ["", "suggestion: " + f.suggestion]
+    out = first + ["", "occurrences:"]
+    out += [f"  {o.phase} [{o.side}]: {o.count}x{'  ' + o.where if o.where else ''}" for o in f.occurrences] or ["  -"]
+    stack = f.details.get("stack")
+    if stack:
+        out += ["", "stack:"] + [f"  {fr}" for fr in stack]
+    if f.details.get("callers"):
+        out += ["", "callers:"] + [f"  {c}" for c in f.details["callers"]]
+    if f.details:
+        out += ["", "details:", json.dumps(f.details, indent=2, sort_keys=True, ensure_ascii=False)]
+    images = f.details.get("images", [])
+    if images and capture_dir:
+        out += ["", "images:"] + [f"  {capture_dir / i}" for i in images]
+    return "\n".join(out) + "\n"
+
+
+def _run_explain(args: argparse.Namespace) -> int:
+    from .findings import lookup
+
+    if not args.dir:
+        raise UsageError("explain needs -d DIR (capture directory or JSON report)")
+    src = Path(args.dir)
+    if src.is_dir():
+        r, root = build_capture_report(src)
+    else:
+        try:
+            r, root = load_json(src.read_text(encoding="utf-8")), None
+        except OSError as e:
+            raise DoctorError(f"cannot read {src}: {e.strerror}") from e
+    try:
+        f = lookup(r.findings, args.id)
+    except LookupError as e:
+        if str(e).startswith("ambiguous"):
+            raise UsageError(str(e)) from e
+        raise DoctorError("no finding matches ID" + f" {args.id}") from e
+    sys.stdout.write(render_explain(f, r, root))
+    return 0
 
 
 def register(sub: argparse._SubParsersAction) -> None:
@@ -312,3 +361,9 @@ def register(sub: argparse._SubParsersAction) -> None:
                                                     "(default: $ATL_DOCTOR_ATL_SRC)")
     p.add_argument("dirs", nargs="*", metavar="DIR", help="capture directory [and Android capture directory]")
     p.set_defaults(func=_run_report)
+
+    e = sub.add_parser("explain", help="show everything known about one finding", parents=[common_parser()])
+    e.add_argument("-d", "--dir", metavar="DIR", help="capture directory or JSON report")
+    e.add_argument("--aosp", metavar="DIR", help="AOSP tree (reserved for the AOSP comparison; not used yet)")
+    e.add_argument("id", metavar="ID", help="full ID, short ID or unique short-ID prefix")
+    e.set_defaults(func=_run_explain)

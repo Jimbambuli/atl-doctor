@@ -1,0 +1,2 @@
+option('jdk', type: 'string', value: '',
+       description: 'JDK whose include/jni.h and jvmti.h are used (default: $JAVA_HOME, else /usr/lib/jvm/default-java)')

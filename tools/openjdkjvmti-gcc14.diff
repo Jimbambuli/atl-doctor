@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: Apache-2.0
+# Lets art/openjdkjvmti build with GCC 14 (explicit template arguments). Apply in a copy of the art_standalone
+# tree before tools/build-jvmti-plugin.sh:  patch -p0 < openjdkjvmti-gcc14.diff
+--- art/openjdkjvmti/events-inl.h.orig	2026-10-25 06:03:10.294358314 +0000
++++ art/openjdkjvmti/events-inl.h	2026-10-25 06:03:10.313304642 +0000
+@@ -469,14 +469,14 @@
+ }
+ 
+ template <>
+-inline void EventHandler::DispatchEvent<ArtJvmtiEvent::kClassLoad>(art::Thread* thread,
++inline void EventHandler::DispatchEvent<ArtJvmtiEvent::kClassLoad, jthread, jclass>(art::Thread* thread,
+                                                                    JNIEnv* jnienv,
+                                                                    jthread jni_thread,
+                                                                    jclass klass) const {
+   DispatchClassLoadOrPrepareEvent<ArtJvmtiEvent::kClassLoad>(thread, jnienv, jni_thread, klass);
+ }
+ template <>
+-inline void EventHandler::DispatchEvent<ArtJvmtiEvent::kClassPrepare>(art::Thread* thread,
++inline void EventHandler::DispatchEvent<ArtJvmtiEvent::kClassPrepare, jthread, jclass>(art::Thread* thread,
+                                                                       JNIEnv* jnienv,
+                                                                       jthread jni_thread,
+                                                                       jclass klass) const {
+@@ -486,7 +486,7 @@
+ // Need to give a custom specialization for NativeMethodBind since it has to deal with an out
+ // variable.
+ template <>
+-inline void EventHandler::DispatchEvent<ArtJvmtiEvent::kNativeMethodBind>(art::Thread* thread,
++inline void EventHandler::DispatchEvent<ArtJvmtiEvent::kNativeMethodBind, jthread, jmethodID, void*, void**>(art::Thread* thread,
+                                                                           JNIEnv* jnienv,
+                                                                           jthread jni_thread,
+                                                                           jmethodID method,
+@@ -520,7 +520,7 @@
+ // ClassFileLoadHook event types is the same, and in the DispatchClassFileLoadHookEvent helper.
+ // The following two DispatchEvent specializations dispatch to it.
+ template <>
+-inline void EventHandler::DispatchEvent<ArtJvmtiEvent::kClassFileLoadHookRetransformable>(
++inline void EventHandler::DispatchEvent<ArtJvmtiEvent::kClassFileLoadHookRetransformable, jclass, jobject, const char*, jobject, jint, const unsigned char*, jint*, unsigned char**>(
+     art::Thread* thread,
+     JNIEnv* jnienv,
+     jclass class_being_redefined,
+@@ -545,7 +545,7 @@
+ }
+ 
+ template <>
+-inline void EventHandler::DispatchEvent<ArtJvmtiEvent::kClassFileLoadHookNonRetransformable>(
++inline void EventHandler::DispatchEvent<ArtJvmtiEvent::kClassFileLoadHookNonRetransformable, jclass, jobject, const char*, jobject, jint, const unsigned char*, jint*, unsigned char**>(
+     art::Thread* thread,
+     JNIEnv* jnienv,
+     jclass class_being_redefined,
+--- art/openjdkjvmti/ti_logging.h.orig	2026-10-25 06:03:10.295889768 +0000
++++ art/openjdkjvmti/ti_logging.h	2026-10-25 06:03:10.313492662 +0000
+@@ -52,7 +52,7 @@
+                                   __LINE__,                  \
+                                   ::android::base::DEFAULT,  \
+                                   SEVERITY_LAMBDA(severity), \
+-                                  _LOG_TAG_INTERNAL,         \
++                                  nullptr,         \
+                                   -1)
+ 
+ class JvmtiLogMessage {
+@@ -65,7 +65,7 @@
+                   const char* tag,
+                   int error)
+       : env_(ArtJvmTiEnv::AsArtJvmTiEnv(env)),
+-        real_log_(file, line, id, severity, tag, error),
++        real_log_(file, line, id, severity, error),
+         real_log_stream_(real_log_.stream()) {
+     DCHECK(env_ != nullptr);
+   }
+--- art/openjdkjvmti/OpenjdkJvmTi.cc.orig	2026-10-25 06:05:50.261781319 +0000
++++ art/openjdkjvmti/OpenjdkJvmTi.cc	2026-10-25 06:05:50.262928946 +0000
+@@ -72,6 +72,7 @@
+ #include "ti_threadgroup.h"
+ #include "ti_timers.h"
+ #include "transform.h"
++#include "jvmti_weak_table-inl.h"
+ 
+ namespace openjdkjvmti {
+ 

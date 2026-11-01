@@ -18,3 +18,19 @@ def _assert_golden(text: str, name: str) -> None:
 @pytest.fixture
 def assert_golden():
     return _assert_golden
+
+
+@pytest.fixture(scope="session")
+def built(tmp_path_factory):
+    """The C helpers, built once per session with meson (warnings are errors)."""
+    import shutil
+    import subprocess
+    if not shutil.which("meson") or not shutil.which("ninja"):
+        pytest.skip("meson/ninja missing")
+    b = tmp_path_factory.mktemp("build") / "b"
+    agent = Path(__file__).parent.parent / "agent"
+    subprocess.run(["nice", "-n", "19", "meson", "setup", str(b), str(agent), "-Dwerror=true", "-Dwarning_level=2"],
+                   check=True, capture_output=True)
+    r = subprocess.run(["nice", "-n", "19", "ninja", "-C", str(b), "-j", "2"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    return b

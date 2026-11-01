@@ -6,14 +6,17 @@
 # the sources of art/openjdkjvmti with exactly the flags Android's make would use for them (taken from `make -n`)
 # and links against the libart*.so of PREFIX.
 #   ART_TREE  a COPY of the art_standalone tree the libart of PREFIX was built from (never the original worktree:
-#             `make -n` creates files). With GCC 14 first apply tools/openjdkjvmti-gcc14.diff in it (patch -p0).
-#   PREFIX    the ATL installation prefix (read only)
+#             `make -n` creates files). With GCC 14 or newer (also 16) first apply tools/openjdkjvmti-gcc14.diff in it
+#             (patch -p0).
+#   PREFIX    the ATL installation prefix (read only); its libraries in lib64/ or, if that has no art/, in lib/
 #   J=N       parallel compile jobs (default 2)
-# Result: ART_TREE/jvmti-out/libopenjdkjvmti.so - copy it to PREFIX/lib64/art/ (or point atl-doctor at a prefix
-# that has it there).
+# Result: ART_TREE/jvmti-out/libopenjdkjvmti.so - copy it to PREFIX/lib64/art/ (PREFIX/lib/art/), or point
+# atl-doctor at a prefix that has it there.
 set -euo pipefail
 A=${1:?usage: build-jvmti-plugin.sh ART_TREE PREFIX}
 P=$(realpath "${2:?usage: build-jvmti-plugin.sh ART_TREE PREFIX}")
+L=lib64
+[ -d "$P/lib64/art" ] || [ ! -d "$P/lib/art" ] || L=lib
 cd "$A"
 O=jvmti-out
 mkdir -p $O
@@ -26,6 +29,6 @@ n=$(wc -l < $O/cmds.txt)
 echo "$n sources" >&2
 xargs -P "${J:-2}" -I{} sh -c '{}' < $O/cmds.txt
 g++ -shared -Wl,-soname,libopenjdkjvmti.so -m64 -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now $O/*.o \
-  -L"$P/lib64/art" -Wl,-rpath,"$P/lib64/art" -lart -lart-compiler -lart-dexlayout -ldexfile -lartbase -lbase \
+  -L"$P/$L/art" -Wl,-rpath,"$P/$L/art" -lart -lart-compiler -lart-dexlayout -ldexfile -lartbase -lbase \
   -o $O/libopenjdkjvmti.so
 echo "$A/$O/libopenjdkjvmti.so"

@@ -181,12 +181,17 @@ def _e(x: object) -> str:
 
 def _image_tags(f: Finding, capture_dir: Path | None) -> list[str]:
     tags = []
-    for rel in f.details.get("images", []) if capture_dir else []:
+    crops = f.details.get("crops") or {}
+    rels = list(f.details.get("images", [])) + [crops[k] for k in ("atl", "android") if k in crops]
+    for rel in rels if capture_dir else []:
         try:
             data = (capture_dir / rel).read_bytes()
         except OSError:
             continue
-        tags.append(f'<img alt="{_e(rel)}" src="data:image/png;base64,{base64.b64encode(data).decode()}">')
+        label = {crops.get("atl"): "ATL", crops.get("android"): "Android"}.get(rel)
+        tag = f'<img alt="{_e(rel)}" src="data:image/png;base64,{base64.b64encode(data).decode()}">'
+        tags.append(f'<figure style="display:inline-block;margin:.4rem"><figcaption class="m">{label}</figcaption>{tag}'
+                    f'</figure>' if label else tag)
     return tags
 
 
@@ -305,6 +310,7 @@ def build_pair_report(atl_dir: Path, android_dir: Path, density: float | None) -
     from .sources.exceptions import phases_by_name, compare_sides, lifecycle_findings, lifecycle_sequence, parse_agent
     from .sources.memory import growth, read_memory
     from .sources.perf import android_phase_frames, frame_stats
+    from .sources.shots import attach_crops
     from .sources.tree import load_tree, tree_findings
 
     r, root = build_capture_report(atl_dir)
@@ -337,6 +343,7 @@ def build_pair_report(atl_dir: Path, android_dir: Path, density: float | None) -
             else:
                 trees[f.id] = f
     findings += trees.values()
+    attach_crops(trees.values(), Capture(root), acap, density)
     and_frames = android_phase_frames(acap)
     atl_to_android = {i: pairs[k] for k, i in phases_by_name(atl_names).items() if k in pairs}
     for f in findings:  # Android frame times as comparison values of the ATL jank findings
@@ -387,6 +394,9 @@ def render_explain(f: Finding, r: Report, capture_dir: Path | None) -> str:
     images = f.details.get("images", [])
     if images and capture_dir:
         out += ["", "images:"] + [f"  {capture_dir / i}" for i in images]
+    crops = f.details.get("crops")
+    if crops and capture_dir:
+        out += ["", "crops (ATL, Android):"] + [f"  {capture_dir / crops[k]}" for k in ("atl", "android") if k in crops]
     return "\n".join(out) + "\n"
 
 

@@ -11,6 +11,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -39,6 +40,7 @@ class HeadlessSession:
         self.proc: subprocess.Popen | None = None
         self.bus = ""
         self._n = 0
+        self._script_lock = threading.Lock()  # mark screenshots run beside the step driver
 
     @property
     def log(self) -> Path:
@@ -79,6 +81,10 @@ class HeadlessSession:
 
     def _script(self, js: str) -> list[str]:
         """Run a KWin script; its print() lines starting with ATLDOC (without the tag)."""
+        with self._script_lock:
+            return self._script_locked(js)
+
+    def _script_locked(self, js: str) -> list[str]:
         self._n += 1
         path = self.run_dir / f"script-{self._n}.js"
         path.write_text(js, encoding="utf-8")

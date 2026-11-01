@@ -77,8 +77,8 @@ def _norm(s: str) -> str:
     return " ".join(s.split())
 
 
-def load_tree(path: Path, side: str, density: float | None = None) -> list[Node]:
-    """Nodes of one dump in document order, in dp relative to android:id/content."""
+def load_tree(path: Path, side: str, density: float | None = None, normalize: bool = True) -> list[Node]:
+    """Nodes of one dump in document order, in dp relative to android:id/content (normalize=False: raw pixels)."""
     try:
         root = ET.parse(path).getroot()
     except (OSError, ET.ParseError) as e:
@@ -145,17 +145,28 @@ def load_tree(path: Path, side: str, density: float | None = None) -> list[Node]
                  opaque or n.cls in OPAQUE or n.real_cls in OPAQUE)
 
     walk(root, None, "", None, 1.0, False)
-    _normalize(nodes, scale)
+    if normalize:
+        _normalize(nodes, scale)
     return nodes
 
 
-def _normalize(nodes: list[Node], scale: float) -> None:
+def _origin(nodes: list[Node]) -> tuple[float, float]:
     content = next((n for n in nodes if n.full_id == "android:id/content"), None)
     ox, oy = (content.rect[0], content.rect[1]) if content else (0.0, 0.0)
     # edge-to-edge Android: the status bar lies over the content, the app is inset by its height
     sb = next((n for n in nodes if n.full_id == "android:id/statusBarBackground"), None)
     if sb and sb.rect[3] > oy:
         oy = sb.rect[3]
+    return ox, oy
+
+
+def content_origin(path: Path, side: str) -> tuple[float, float]:
+    """Where dp 0,0 lies in the dump's own pixels (Android: screen, ATL: GTK window surface)."""
+    return _origin(load_tree(path, side, normalize=False))
+
+
+def _normalize(nodes: list[Node], scale: float) -> None:
+    ox, oy = _origin(nodes)
     for n in nodes:
         r = n.rect
         n.rect = ((r[0] - ox) / scale, (r[1] - oy) / scale, (r[2] - ox) / scale, (r[3] - oy) / scale)

@@ -13,7 +13,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .capture import AGENT, ATL_LOG, CONTROL, MARKS, TREES, Capture, Mark
+from .capture import AGENT, ATL_LOG, CONTROL, MARKS, SHOTS, TREES, Capture, Mark
 from .env import Probe, adb_device, find_helper, probe_all
 from .errors import DoctorError, PrerequisiteMissing
 from .record_atl import RecordOptions, _handle_control, drain_control, _start_steps, _Stop, _warn, default_out_dir, tree_name
@@ -121,6 +121,15 @@ def _tree(adb: Adb, cap: Capture, mark: Mark) -> None:
         _warn(f"no view tree for mark {mark.index} ({mark.name}): uiautomator dump failed")
 
 
+def _shot(adb: Adb, cap: Capture, mark: Mark) -> None:
+    r = adb.run("exec-out", "screencap", "-p", timeout=30)
+    if r.returncode != 0 or not r.stdout:
+        _warn(f"no screenshot for mark {mark.index} ({mark.name}): screencap failed")
+        return
+    cap.path(SHOTS).mkdir(exist_ok=True)
+    (cap.path(SHOTS) / f"{tree_name(mark)}.png").write_bytes(r.stdout)
+
+
 def record_android(opts: RecordOptions) -> int:
     from .sources.dex import read_apk
 
@@ -207,6 +216,7 @@ def record_android(opts: RecordOptions) -> int:
             line = f"{mk.index}\t{mk.boot_us}\t{mk.wall_us}\t{mk.name}"
             adb.shell(f"printf '%s\\n' {shlex.quote(line)} >> /data/data/{pkg}/atl-doctor-marks.tsv")
         _tree(adb, cap, mk)
+        _shot(adb, cap, mk)
 
     stop = _Stop()
     try:

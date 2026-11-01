@@ -302,3 +302,31 @@ def test_build_command_heap():
     opts = RecordOptions(apk=Path("/x/app.apk"), out=None, prefix=Path("/p"), atl_src=None, agent=None, heap=True)
     cmd, _ = build_command(opts, Capture(Path("/c")), Path("/p/lib64/art/libopenjdkjvmti.so"), Path("/h/a.so"))
     assert cmd[-1].endswith(",frames,hang=100,heap")
+
+
+def test_mark_screenshot_with_surface_origin(tmp_path, monkeypatch):
+    import atl_doctor.record_atl as ra
+    from atl_doctor.capture import Mark
+    from atl_doctor.sources.shots import read_origin
+
+    class Session:
+        def windows(self):
+            return [{"kind": "normal", "rect": (0.0, 0.0, 100.0, 100.0), "surface": (-14.0, -12.0)}]
+
+        def screenshot(self, path):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"png")
+            return True
+
+    cap = Capture.create(tmp_path / "c", "atl")
+    monkeypatch.setattr("atl_doctor.sources.tree.request_atl_tree", lambda d, name: d / f"{name}.xml")
+    threads = []
+    monkeypatch.setattr(ra.threading, "Thread", lambda target, daemon: threads.append(target) or type("T", (), {"start": lambda s: target()})())
+    ra._request_tree(cap, Mark(1, 0, 0, "Main view"), Session())
+    assert read_origin(tmp_path / "c/shots/01-Main-view.png") == (-14.0, -12.0)
+
+
+def test_spectacle_probe_needs_headless(tmp_prefix, apk, tmp_path):
+    assert main(["record", "-o", str(tmp_path / "c"), "--prefix", str(tmp_prefix), str(apk)]) == 0
+    p = next(p for p in Capture.open(tmp_path / "c").read_manifest().probes if p["name"] == "spectacle")
+    assert not p["available"] and p["reason"] == "screenshots need --headless"

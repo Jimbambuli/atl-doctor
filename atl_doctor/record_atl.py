@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from .capture import AGENT, ATL_LOG, CONTROL, MARKS, STEPS_LOG, TRACE_DIR, TREES, Capture, Mark
+from .capture import AGENT, ATL_LOG, CONTROL, MARKS, SHOTS, STEPS_LOG, TRACE_DIR, TREES, Capture, Mark
 from .env import AGENT_LIB, INPUT_HELPER, TRACECOUNT, Probe, find_helper, has_viewdump, jvmti_plugin, probe_all, resolve
 from .errors import DoctorError, PrerequisiteMissing
 from .headless import APP_HEIGHT, APP_WIDTH, HeadlessSession
@@ -156,13 +156,21 @@ def tree_name(mark: Mark) -> str:
     return f"{mark.index:02d}-" + (re.sub(r"[^A-Za-z0-9._-]+", "-", mark.name).strip("-") or "mark")
 
 
-def _request_tree(cap: Capture, mark: Mark) -> None:
-    """In the background: the control loop must not wait for the app."""
+def _request_tree(cap: Capture, mark: Mark, session: HeadlessSession | None = None) -> None:
+    """In the background: the control loop must not wait for the app. With a headless session the mark also
+    gets a screenshot (shots/NN-name.png)."""
+    from .sources.shots import take_atl_shot
     from .sources.tree import request_atl_tree
 
     def run() -> None:
         if request_atl_tree(cap.path(TREES), tree_name(mark)) is None:
             _warn(f"no view tree for mark {mark.index} ({mark.name}): ATLViewDump did not answer")
+        if session is not None:
+            try:
+                if not take_atl_shot(session, cap.path(SHOTS) / f"{tree_name(mark)}.png"):
+                    _warn(f"no screenshot for mark {mark.index} ({mark.name}): spectacle failed")
+            except DoctorError as e:
+                _warn(f"no screenshot for mark {mark.index} ({mark.name}): {e}")
 
     threading.Thread(target=run, daemon=True).start()
 
@@ -271,6 +279,9 @@ def record_atl(opts: RecordOptions) -> int:
     trees = "ATL_VIEWDUMP" in extra_env
     if trees:
         cap.path(TREES).mkdir()
+    if not opts.headless:  # screenshots come from spectacle inside the headless session
+        probes = [Probe("spectacle", False, "screenshots need --headless", p.hint) if p.name == "spectacle" else p
+                  for p in probes]
     m = cap.read_manifest()
     m.apk, m.package, m.version_name = str(opts.apk), info.package, info.version_name
     m.command = cmd
@@ -309,7 +320,7 @@ def record_atl(opts: RecordOptions) -> int:
             if steps is not None:
                 driver = make_atl_driver(cap, session, opts, info.package)
                 steps_state = _start_steps(cap, driver, steps, str(opts.steps))
-            rc = _record_loop(cap, proc, stop, ctl, trees, steps_state)
+            rc = _record_loop(cap, proc, stop, ctl, trees, steps_state, session)
     finally:
         if driver is not None:
             driver.close()
@@ -320,7 +331,8 @@ def record_atl(opts: RecordOptions) -> int:
     return _finish(cap, m, rc, stop, steps_state, count_proc, trace_dir, out)
 
 
-def _record_loop(cap: Capture, proc: subprocess.Popen, stop: _Stop, ctl: int, trees: bool, steps_state: dict) -> int:
+def _record_loop(cap: Capture, proc: subprocess.Popen, stop: _Stop, ctl: int, trees: bool, steps_state: dict,
+                 session: HeadlessSession | None = None) -> int:
     """Until ATL ends, SIGINT/SIGTERM or the steps are done; serves the control FIFO meanwhile."""
     started, buf = time.monotonic(), bytearray()
     while proc.poll() is None and stop.by is None and not steps_state.get("done"):
@@ -335,13 +347,13 @@ def _record_loop(cap: Capture, proc: subprocess.Popen, stop: _Stop, ctl: int, tr
                 for mk in _handle_control(cap, os.read(ctl, 4096), buf):
                     _memory(cap, proc.pid, mk.index)
                     if trees:
-                        _request_tree(cap, mk)
+                        _request_tree(cap, mk, session)
             except BlockingIOError:
                 pass
     for mk in drain_control(cap, ctl, buf):  # a mark sent by the last step
         _memory(cap, proc.pid, mk.index)
         if trees:
-            _request_tree(cap, mk)
+            _request_tree(cap, mk, session)
     if proc.poll() is None:
         _memory(cap, proc.pid, "end")
     if stop.by is not None:

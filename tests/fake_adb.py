@@ -5,7 +5,8 @@ State lives in $FAKE_ADB_DIR:
   calls.log     one line per call (arguments after an optional `-s SERIAL`, joined by spaces)
   table.json    {"PREFIX": [stdout, rc], ...}: the longest matching prefix of the joined arguments answers
   device/       files of the "device": `pull SRC DST` and `exec-out cat SRC` read device/<basename of SRC>;
-                `shell pidof PKG` prints device/pidof if it exists
+                `shell pidof PKG` prints device/pidof if it exists;
+                `exec-out screencap -p` prints device/screencap.png
 `logcat` without -c prints two lines and runs until terminated; unmatched calls succeed silently.
 """
 import json
@@ -47,6 +48,12 @@ def main() -> int:
         return 0
     if args[:2] == ["exec-out", "cat"]:
         src = dev / Path(args[2]).name
+        if src.exists():
+            sys.stdout.buffer.write(src.read_bytes())
+            return 0
+        return 1
+    if args[:3] == ["exec-out", "screencap", "-p"]:
+        src = dev / "screencap.png"
         if src.exists():
             sys.stdout.buffer.write(src.read_bytes())
             return 0

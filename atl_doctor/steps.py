@@ -408,8 +408,9 @@ class AtlDriver:
 
     def screenshot(self, name: str) -> None:
         from .capture import SHOTS
+        from .sources.shots import take_atl_shot
 
-        if not self.session.screenshot(self.cap.path(SHOTS) / f"{_safe(name)}.png"):
+        if not take_atl_shot(self.session, self.cap.path(SHOTS) / f"{_safe(name)}.png"):
             raise DoctorError("screenshot failed (spectacle)")
 
     def wait_idle(self, timeout_s: float) -> bool:

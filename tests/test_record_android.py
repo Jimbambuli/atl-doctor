@@ -224,3 +224,16 @@ def test_android_steps(adb, apk, tmp_path):
     assert [k.name for k in Capture(out).read_marks()] == ["start", "M"]
     assert Capture(out).read_manifest().environment["stopped_by"] == "steps"
     assert "shell am force-stop org.example.demo" in c[-6:] or c.count("shell am force-stop org.example.demo") >= 2
+
+
+def test_android_mark_screenshot(adb, apk, tmp_path, capsys):
+    table(adb)
+    (adb / "device" / "screencap.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    out = tmp_path / "c"
+    assert _run_with_mark(adb, apk, out) == 0
+    assert "exec-out screencap -p" in calls(adb)
+    assert (out / "shots/01-Main.png").read_bytes().endswith(b"fake")
+    capsys.readouterr()
+    (adb / "device" / "screencap.png").unlink()
+    assert _run_with_mark(adb, apk, tmp_path / "d") == 0
+    assert "no screenshot for mark 1 (Main): screencap failed" in capsys.readouterr().err

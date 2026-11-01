@@ -665,3 +665,18 @@ def test_record_api_env_stub_list_and_apk_link(tmp_prefix, apk, tmp_path):
     probes = {p["name"]: p for p in m.probes}
     assert probes["stub-list"]["available"] and "atl-src" not in probes
     assert m.environment["stub_list"] == str(stubs)
+
+
+def test_build_command_light_attaches_agent_samples_and_counts_stubs(tmp_path):
+    cap = Capture.create(tmp_path / "c", "atl")
+    opts = RecordOptions(apk=Path("/x/app.apk"), out=None, prefix=Path("/p"), atl_src=None, agent=None,
+                         atl_args=["--sdk-int", "34"], light=True)
+    cmd, env = build_command(opts, cap, Path("/p/lib64/art/libopenjdkjvmti.so"), Path("/h/libatl_doctor_agent.so"))
+    c = cap.root
+    assert cmd == ["/p/bin/android-translation-layer", "/x/app.apk", "--sdk-int", "34",
+                   f"--attach-agent=/h/libatl_doctor_agent.so={c}/agent.tsv,marks={c}/marks.tsv,arm={c}/armed,frames,"
+                   f"hang=100,sample=1000,sampletrace={c}/trace/trace.bin"]
+    assert not any("-Xmethod-trace" in a or "-agentpath" in a for a in cmd)
+    assert env == {"LD_LIBRARY_PATH": "/p/lib64:/p/lib64/art", "ATL_STUB_HITS": f"{c}/stubhits.tsv"}
+    cmd, _ = build_command(opts, cap, None, Path("/h/libatl_doctor_agent.so"), trace=False)
+    assert cmd[-1].endswith(",hang=100")  # no counter: no sampling

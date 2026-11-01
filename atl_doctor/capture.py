@@ -17,6 +17,7 @@ CAPTURE_FORMAT = 1
 MANIFEST = "manifest.json"
 ATL_LOG = "atl.log"
 AGENT = "agent.tsv"
+STUB_HITS = "stubhits.tsv"  # stub calls counted by ATL itself (ATL_STUB_HITS)
 MARKS = "marks.tsv"
 TRACE_DIR = "trace"
 TREES = "trees"

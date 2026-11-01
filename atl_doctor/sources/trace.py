@@ -2,6 +2,7 @@
 """ART method trace: the watch list for atl-doctor-tracecount and its output turned into stub findings."""
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,3 +80,49 @@ def stub_findings(hits: list[TraceHit], entries: list[StubEntry], marks: list[Ma
         ranked = sorted(callers[key].items(), key=lambda kv: (kv[0][0] != "a", -kv[1], kv[0][1]))
         out.append(stub_finding(key[0], key[1], entries, key in result_used, occ, [c for (_, c), _ in ranked]))
     return out
+
+
+def read_stub_hits(path: Path, marks: list[Mark], app_prefix: str,
+                   entries: list[StubEntry]) -> tuple[list[TraceHit], list[StubEntry]]:
+    """Stub calls counted by ATL itself (ATL_STUB_HITS, see android.atl.ATLStubHits), as TraceHits per phase.
+
+    Lines: N id class method sig kind | S boot_us id cumulative_count | C id caller. A phase gets the growth of the
+    count between its mark and the next one (a phase is the last mark at or before the S line's time). Returned
+    with stub entries for the stubs `entries` does not know (kind from ATL, no source location)."""
+    names: dict[int, tuple[str, str, str, str]] = {}
+    callers: dict[int, list[str]] = defaultdict(list)
+    per_phase: dict[int, dict[int, int]] = defaultdict(dict)  # id -> phase -> highest cumulative count
+    starts = [k.boot_us for k in marks]
+    for f in _rows(Path(path)):
+        try:
+            if f[0] == "N" and len(f) >= 6:
+                names[int(f[1])] = (f[2], f[3], f[4], f[5])
+            elif f[0] == "S" and len(f) >= 4:
+                t, sid, n = int(f[1]), int(f[2]), int(f[3])
+                phase = marks[max(0, bisect_right(starts, t) - 1)].index if marks else 0
+                per_phase[sid][phase] = max(n, per_phase[sid].get(phase, 0))
+            elif f[0] == "C" and len(f) >= 3:
+                callers[int(f[1])].append(f[2])
+        except ValueError:
+            continue
+    hits: list[TraceHit] = []
+    for sid, phases in per_phase.items():
+        if sid not in names:
+            continue
+        cls, method, sig, _ = names[sid]
+        before = 0
+        for phase in sorted(phases):
+            n = phases[phase] - before
+            before = phases[phase]
+            if n > 0:
+                hits.append(TraceHit(phase, cls, method, sig, "", "-", n))
+        for c in callers.get(sid, []):  # callers come without counts: one each, app package first
+            if c != "-":
+                hits.append(TraceHit(phases and min(phases) or 0, cls, method, sig, c,
+                                     "a" if app_prefix and c.startswith(app_prefix) else "o", 0))
+    known = {(e.cls, e.method) for e in entries}
+    extra = {}
+    for cls, method, sig, kind in names.values():
+        if (cls, method) not in known:
+            extra.setdefault((cls, method), StubEntry(kind, cls, method, sig, "", "", ""))
+    return hits, list(extra.values())

@@ -17,7 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from .capture import AGENT, ATL_LOG, CONTROL, MARKS, SHOTS, STEPS_DATA, STEPS_LOG, TRACE_DIR, TREES, Capture, Mark
+from .capture import (AGENT, ATL_LOG, CONTROL, MARKS, SHOTS, STEPS_DATA, STEPS_LOG, STUB_HITS, TRACE_DIR, TREES, Capture,
+                      Mark)
 from .env import (AGENT_LIB, INPUT_HELPER, TRACECOUNT, WHEEL_SHIM, Probe, find_helper, has_viewdump, jvmti_plugin, lib_dir,
                   probe_all, resolve)
 from .errors import DoctorError, PrerequisiteMissing, UsageError
@@ -33,6 +34,7 @@ STOP_GRACE_S = 10.0
 TRACE_FILE = "trace.bin"
 AGENT_PATH_MAX = 480  # agent buffers hold 511 bytes: capture path + "/atl-doctor-..." file names
 TRACE_PREFIX = "tr"
+SAMPLE_US = 1000  # light: ART's sampling profiler interval
 STUBS_TSV = "stubs.tsv"
 WATCH = "watch.txt"
 # optional probes `record` uses; a missing one gives one stderr line and the recording goes on
@@ -55,6 +57,10 @@ class RecordOptions:
     trace: bool = True  # method trace (stub hits); slows the app down a lot
     env: dict[str, str] = field(default_factory=dict)  # added to ATL's environment (API only, e.g. a launcher program)
     stub_list: Path | None = None  # a saved stub list (trace/stubs.tsv) instead of building one from atl_src
+    # light: the app keeps (almost) its normal speed. The agent is attached once the runtime runs (ATL
+    # --attach-agent, the runtime stays non-debuggable), ATL counts its stub calls itself (ATL_STUB_HITS) and the
+    # time line comes from ART's sampling profiler instead of a full method trace. Needs an ATL with both.
+    light: bool = False
 
 
 def default_out_dir(now: datetime) -> Path:
@@ -67,14 +73,21 @@ def build_command(opts: RecordOptions, cap: Capture, plugin: Path | None, agent:
     c = cap.root
     start = shlex.split(opts.launcher) if opts.launcher else [str(opts.prefix / "bin/android-translation-layer")]
     cmd = [*start, str(opts.apk), *opts.atl_args]
-    if trace:
-        cmd += ["-X", "-Xmethod-trace", "-X", "-Xmethod-trace-stream",
-                "-X", f"-Xmethod-trace-file:{c}/{TRACE_DIR}/{TRACE_FILE}"]
-    if plugin and agent:
-        cmd += ["-X", f"-agentpath:{agent}={c}/{AGENT},late={plugin},latesec=3,marks={c}/{MARKS},arm={c}/{ARM_FILE}"
-                      f",frames,hang={HANG_MS}" + (",heap" if opts.heap else "")]
+    agent_opts = f"{c}/{AGENT},marks={c}/{MARKS},arm={c}/{ARM_FILE},frames,hang={HANG_MS}" + (",heap" if opts.heap else "")
+    if opts.light:
+        if agent:  # ART finds its JVMTI plugin itself (Runtime::AttachAgent); the agent starts the sampling
+            sample = f",sample={SAMPLE_US},sampletrace={c}/{TRACE_DIR}/{TRACE_FILE}" if trace else ""
+            cmd += [f"--attach-agent={agent}={agent_opts}{sample}"]
+    else:
+        if trace:
+            cmd += ["-X", "-Xmethod-trace", "-X", "-Xmethod-trace-stream",
+                    "-X", f"-Xmethod-trace-file:{c}/{TRACE_DIR}/{TRACE_FILE}"]
+        if plugin and agent:
+            cmd += ["-X", f"-agentpath:{agent}={agent_opts.replace(',', f',late={plugin},latesec=3,', 1)}"]
     lib = lib_dir(opts.prefix) if opts.prefix else None
     env = {"LD_LIBRARY_PATH": f"{lib}:{lib}/art"} if lib else {}
+    if opts.light:
+        env["ATL_STUB_HITS"] = f"{c}/{STUB_HITS}"
     if has_viewdump(opts.prefix):
         env["ATL_VIEWDUMP"] = f"{c}/{TREES}"
     if wheel and " " in str(wheel):  # LD_PRELOAD splits at spaces too
@@ -316,7 +329,7 @@ def record_atl(opts: RecordOptions) -> int:
         except OSError as e:
             raise DoctorError(f"cannot read {opts.stub_list}: {e.strerror}") from e
         save_stub_tsv(entries, trace_dir / STUBS_TSV)
-    write_watch_file(entries, watch)
+    write_watch_file([] if opts.light else entries, watch)  # light: samples are no calls, ATL counts stub hits
 
     if opts.headless and not any(a in ("-w", "--width") for a in opts.atl_args):
         opts.atl_args = ["-w", str(APP_WIDTH), "-h", str(APP_HEIGHT), *opts.atl_args]
@@ -343,7 +356,10 @@ def record_atl(opts: RecordOptions) -> int:
                      **({"atl_src": str(opts.atl_src)} if opts.atl_src else {}),
                      **({"stub_list": str(opts.stub_list)} if opts.stub_list and not opts.atl_src else {})}
     if not opts.trace:
-        m.environment["trace"] = "off (--no-trace): no stub hits recorded"
+        m.environment["trace"] = "off (--no-trace): no stub hits recorded" if not opts.light else \
+            "off (--no-trace): no time line; stub hits counted by ATL"
+    elif opts.light:
+        m.environment["trace"] = f"sampling every {SAMPLE_US} us (--light); stub hits counted by ATL"
     cap.write_manifest(m)
 
     session = driver = None
@@ -515,7 +531,7 @@ def _run_record(args: argparse.Namespace) -> int:
                          prefix=Path(prefix) if prefix else None, launcher=args.launcher, trace=args.trace,
                          atl_src=Path(atl_src) if atl_src else None, agent=Path(args.agent) if args.agent else None,
                          headless=args.headless, steps=Path(args.steps) if args.steps else None, heap=args.heap,
-                         atl_args=list(args.atl_args))
+                         atl_args=list(args.atl_args), light=args.light)
     return record_atl(opts)
 
 
@@ -538,6 +554,9 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--steps", metavar="FILE", help="drive the app with a step file; implies --headless under ATL")
     p.add_argument("--no-trace", dest="trace", action="store_false",
                    help="no method trace: the app runs at full speed, but the report has no stub hits")
+    p.add_argument("--light", action="store_true",
+                   help="fast recording: agent attached after start (ATL --attach-agent), stub hits counted by ATL, "
+                        "time line from ART's sampling profiler instead of a full method trace (needs a recent ATL)")
     p.add_argument("--heap", action="store_true",
                    help="count instances and bytes per class at every mark (agent; slow, forces a GC per mark)")
     p.add_argument("--android", action="store_true",

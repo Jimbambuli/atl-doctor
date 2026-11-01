@@ -5,7 +5,7 @@ atl-doctor \- find out why an Android app does not run correctly under Android T
 .SH SYNOPSIS
 .B atl-doctor record
 [\fB\-o\fR \fIDIR\fR] [\fB\-\-android\fR] [\fB\-\-prefix\fR \fIDIR\fR | \fB\-\-launcher\fR \fICMD\fR]
-[\fB\-\-atl\-src\fR \fIDIR\fR] [\fB\-\-agent\fR \fIPATH\fR] [\fB\-\-headless\fR] [\fB\-\-steps\fR \fIFILE\fR] [\fB\-\-no\-trace\fR] [\fB\-\-heap\fR]
+[\fB\-\-atl\-src\fR \fIDIR\fR] [\fB\-\-agent\fR \fIPATH\fR] [\fB\-\-headless\fR] [\fB\-\-steps\fR \fIFILE\fR] [\fB\-\-no\-trace\fR] [\fB\-\-light\fR] [\fB\-\-heap\fR]
 \fIAPK\fR [\fB\-\-\fR \fIATL\-ARGS\fR]
 .br
 .B atl-doctor mark
@@ -95,6 +95,12 @@ one that came and went earlier does not.
 .B \-\-no\-trace
 No method trace. The trace slows the app down many times over (a first start can take minutes); without it
 the times in \fIsteps.tsv\fR are realistic, but the report has no stub hits.
+.TP
+.B \-\-light
+Fast recording that keeps the app at (almost) its normal speed: the agent is attached once the runtime runs
+(ATL \fB\-\-attach\-agent\fR; the runtime stays non\-debuggable), ATL counts calls of its stub methods itself
+(\fBATL_STUB_HITS\fR, \fIstubhits.tsv\fR) and the time line comes from ART's sampling profiler (every 1 ms) instead
+of a full method trace; the report shows the busiest methods per phase. Needs an ATL that has both.
 .TP
 .B \-\-heap
 Count instances and bytes per class at every mark (agent; slow, forces a garbage collection per mark).

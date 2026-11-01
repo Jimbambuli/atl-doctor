@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 WAIT_IDLE_S = 10.0
 WAIT_WINDOW_S = 60.0
+TEXT_CHUNK = 400  # bytes of text per line to the input helper (it reads lines of up to 511 bytes)
 
 
 @dataclass(frozen=True)
@@ -492,7 +493,18 @@ class AtlDriver:
         self._send(f"key {combo}")
 
     def type_text(self, s: str) -> None:
-        self._send(f"text {s}")
+        # the helper reads lines of up to 511 bytes and decodes UTF-8 of up to 3 bytes (no emoji)
+        wide = next((c for c in s if ord(c) > 0xFFFF), None)
+        if wide:
+            raise DoctorError(f"type: character U+{ord(wide):04X} cannot be typed (outside the BMP)")
+        chunk = ""
+        for c in s:
+            if len((chunk + c).encode()) > TEXT_CHUNK:
+                self._send(f"text {chunk}")
+                chunk = ""
+            chunk += c
+        if chunk:
+            self._send(f"text {chunk}")
 
     def _window_centre(self) -> tuple[int, int]:
         w = self._main_window()

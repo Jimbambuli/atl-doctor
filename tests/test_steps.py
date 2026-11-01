@@ -176,3 +176,20 @@ def test_atl_driver_wheel_notches_vs_smooth(tmp_path, monkeypatch):
     d.scroll(5)            # real wheel notches (the preload shim turns them into source wheel + value120)
     d.scroll_smooth(-90)   # the former touchpad-like scrolling
     assert sent == ["wheel 666 400 5", "wheel-smooth 666 400 -90"]
+
+
+def test_atl_driver_type_splits_long_text_and_refuses_4_byte_characters(tmp_path, monkeypatch):
+    """The helper reads lines of at most 511 bytes and types UTF-8 of up to 3 bytes per character."""
+    from atl_doctor.capture import Capture
+    from atl_doctor.errors import DoctorError
+    from atl_doctor.steps import AtlDriver
+
+    cap = Capture.create(tmp_path / "c", "atl")
+    d = AtlDriver(cap, _Session(), tmp_path / "fifo", tmp_path / "status", has_tree=False, frames=False)
+    sent = []
+    monkeypatch.setattr(d, "_send", sent.append)
+    text = "a" * 399 + "ü" * 300
+    d.type_text(text)
+    assert all(len(s.encode()) <= 405 for s in sent) and "".join(s[5:] for s in sent) == text
+    with pytest.raises(DoctorError, match="U\\+1F600"):
+        d.type_text("ok \U0001F600")

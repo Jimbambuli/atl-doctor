@@ -217,6 +217,10 @@ GTK sees the notches as smooth scrolling. \fBscroll\-smooth\fR DY scrolls touchp
 (surface pixels under ATL, dp on Android) and is what \fBscroll\fR sent before. On Android every notch is one
 swipe of 64 dp (adb cannot send a wheel source).
 .PP
+\fBtype\fR under ATL types through the US keyboard layout of the headless session: characters that layout has
+no key for (umlauts, for example) and characters outside the Basic Multilingual Plane (emoji) cannot be typed
+and fail the step.
+.PP
 The same file runs under ATL and on Android, so the two recordings can be compared step by step.
 Error messages carry file name and line number.
 .SH ENVIRONMENT

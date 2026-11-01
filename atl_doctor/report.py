@@ -389,6 +389,8 @@ def build_capture_report(path: Path, jank_min_frames: int = JANK_MIN_FRAMES) -> 
                              ("started", m.started), ("ended", m.ended), ("signal", m.signal)) if v}
     if m.exit_status is not None:
         env["exit"] = str(m.exit_status)
+    if m.environment.get("tracecount"):
+        env["tracecount"] = m.environment["tracecount"]
     used: set[tuple[str, str]] = set()
     if entries is not None:
         try:

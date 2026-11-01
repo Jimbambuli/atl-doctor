@@ -382,3 +382,38 @@ def test_build_command_preloads_wheel_shim(tmp_path, monkeypatch):
     assert env["LD_PRELOAD"] == "/h/libatl_doctor_wheel.so:/x/other.so"
     _, env = build_command(opts, cap, None, None, trace=False)
     assert "LD_PRELOAD" not in env
+
+
+def test_ctrl_c_to_process_group_keeps_stub_counts(built, tmp_prefix, apk, tmp_path):
+    """Ctrl-C in a terminal hits the whole foreground group: the counter must survive it and still write its counts."""
+    helpers = tmp_prefix / "lib/atl-doctor"
+    helpers.mkdir(parents=True)
+    shutil.copy(built / "atl-doctor-tracecount", helpers)
+    c = tmp_path / "c"
+    code = ("import sys; from atl_doctor.cli import main; "
+            f"sys.exit(main(['record', '-o', {str(c)!r}, '--prefix', {str(tmp_prefix)!r}, "
+            f"'--atl-src', {str(HERE / 'data/atl-src')!r}, {str(apk)!r}, '--', '--trace', '--wait']))")
+    p = subprocess.Popen([sys.executable, "-c", code], env={**os.environ, "PYTHONPATH": str(HERE.parent)},
+                         start_new_session=True)  # own group, like a shell job
+    assert wait_for(lambda: (c / "control").exists() and "fake atl" in (c / "atl.log").read_text())
+    time.sleep(0.5)
+    os.killpg(p.pid, signal.SIGINT)
+    assert p.wait(timeout=60) == 0
+    assert (c / "trace/tr.counts").is_file() and (c / "trace/tr.callers").is_file()
+    assert "tracecount" not in Capture.open(c).read_manifest().environment
+
+
+def test_failed_counter_is_reported(tmp_prefix, apk, tmp_path, capsys):
+    """A counter that dies without its counts: warning and an environment note, not a silent empty stub list."""
+    helpers = tmp_prefix / "lib/atl-doctor"
+    helpers.mkdir(parents=True)
+    (helpers / "atl-doctor-tracecount").write_text("#!/bin/sh\nexit 3\n")
+    (helpers / "atl-doctor-tracecount").chmod(0o755)
+    c = tmp_path / "c"
+    assert main(["record", "-o", str(c), "--prefix", str(tmp_prefix), "--atl-src", str(HERE / "data/atl-src"),
+                 str(apk)]) == 0
+    assert "tracecount failed" in capsys.readouterr().err
+    note = Capture.open(c).read_manifest().environment["tracecount"]
+    assert note.startswith("failed")
+    assert main(["report", str(c)]) == 0
+    assert "tracecount: failed" in capsys.readouterr().out

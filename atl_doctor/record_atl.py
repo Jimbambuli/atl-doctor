@@ -316,7 +316,8 @@ def record_atl(opts: RecordOptions) -> int:
         with open(trace_dir / "tracecount.log", "wb") as clog:
             count_proc = subprocess.Popen(
                 [str(counter), str(trace_dir / TRACE_FILE), str(cap.path(MARKS)), str(trace_dir / TRACE_PREFIX),
-                 str(watch), (info.package or "") + "."], stdout=subprocess.DEVNULL, stderr=clog)
+                 str(watch), (info.package or "") + "."], stdout=subprocess.DEVNULL, stderr=clog,
+                start_new_session=True)  # Ctrl-C hits the terminal's group; the counter is stopped via tr.stop
     stop = _Stop()
     try:
         with stop, open(cap.path(ATL_LOG), "wb", buffering=0) as logf:
@@ -385,6 +386,11 @@ def _finish(cap: Capture, m, rc: int, stop: _Stop, steps_state: dict, count_proc
             count_proc.kill()
             count_proc.wait()
             _warn("tracecount did not finish in time; trace counts may be incomplete")
+        counts = trace_dir / (TRACE_PREFIX + ".counts")
+        if count_proc.returncode != 0 or not counts.is_file():
+            why = f"exit {count_proc.returncode}" if count_proc.returncode else "no counts written"
+            m.environment["tracecount"] = f"failed ({why}, see trace/tracecount.log): stub hits missing"
+            _warn(f"tracecount failed ({why}); the report has no stub hits, see {trace_dir / 'tracecount.log'}")
 
     m.ended = datetime.now(timezone.utc).isoformat(timespec="seconds")
     if stop.by is not None:

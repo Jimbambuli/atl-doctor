@@ -417,3 +417,34 @@ def test_failed_counter_is_reported(tmp_prefix, apk, tmp_path, capsys):
     assert note.startswith("failed")
     assert main(["report", str(c)]) == 0
     assert "tracecount: failed" in capsys.readouterr().out
+
+
+def test_headless_session_passes_paths_as_arguments_not_shell_text(monkeypatch, request):
+    """A capture path with shell characters must reach sh as an argument, never inside the script."""
+    from atl_doctor import headless
+    from atl_doctor.errors import DoctorError
+
+    import tempfile
+    base = Path(tempfile.mkdtemp(prefix="h"))  # short: the session runs right there, not in a temporary directory
+    request.addfinalizer(lambda: shutil.rmtree(base, ignore_errors=True))
+    run = base / '$(x)`y`"' / "run"
+    run.parent.mkdir()
+    seen = {}
+
+    class Dead:
+        def poll(self):
+            return 1
+
+    def popen(args, **kw):
+        seen["args"] = args
+        return Dead()
+
+    monkeypatch.setattr(headless.subprocess, "Popen", popen)
+    s = headless.HeadlessSession(run)
+    assert s.run_dir == run
+    monkeypatch.setattr(s, "stop", lambda: None)  # the fake process must not be signalled
+    with pytest.raises(DoctorError):
+        s.start()
+    script = seen["args"][seen["args"].index("-c") + 1]
+    assert str(s.run_dir) not in script and "$(" not in script.replace("$DBUS_SESSION_BUS_ADDRESS", "")
+    assert str(s.run_dir / "bus") in seen["args"]

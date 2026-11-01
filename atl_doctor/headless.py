@@ -56,10 +56,12 @@ class HeadlessSession:
                "KWIN_WAYLAND_NO_PERMISSION_CHECKS": "1", "KWIN_SCREENSHOT_NO_PERMISSION_CHECKS": "1"}
         env.pop("WAYLAND_DISPLAY", None)
         env.pop("DISPLAY", None)
-        script = (f'echo "$DBUS_SESSION_BUS_ADDRESS" > "{bus_file}"; exec kwin_wayland --virtual --no-lockscreen '
-                  f'--no-global-shortcuts --width {width} --height {height} --socket {self.socket}')
+        # paths go in as arguments ($1, $2), never into the script text
+        script = ('echo "$DBUS_SESSION_BUS_ADDRESS" > "$1"; exec kwin_wayland --virtual --no-lockscreen '
+                  f'--no-global-shortcuts --width {width} --height {height} --socket "$2"')
         with open(self.log, "wb") as log:
-            self.proc = subprocess.Popen(["dbus-run-session", "--", "sh", "-c", script], env=env, stdout=log,
+            self.proc = subprocess.Popen(["dbus-run-session", "--", "sh", "-c", script, "sh", str(bus_file), self.socket],
+                                         env=env, stdout=log,
                                          stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
         end = time.monotonic() + START_TIMEOUT_S
         while time.monotonic() < end:

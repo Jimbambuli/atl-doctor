@@ -5,15 +5,15 @@ import pytest
 
 from atl_doctor.steps import Repeat, Step, StepError, parse_steps, run_steps
 
-SPEC_EXAMPLE = '''wait-window "My App"       # bis das Fenster da ist (Titel oder App-Paket)
-click "Playlist"           # Text, Ressourcen-ID (id/foo) oder dp-Koordinaten (x,y)
-key Escape                 # Tasten wie xkb-Namen, Kombinationen ctrl+a
+SPEC_EXAMPLE = '''wait-window "My App"       # until the window is there (title or app package)
+click "Playlist"           # text, resource ID (id/foo) or dp coordinates (x,y)
+key Escape                 # keys as xkb names, combinations ctrl+a
 type "Hallo"
-scroll 5                   # Rasten, negativ = hoch
-wait 2                     # Sekunden
-wait-idle                  # bis keine Bildänderung/kein Layout mehr (Zeitgrenze)
-mark "Import"              # Phasenmarke (+ View-Baum + Bildschirmfoto)
-repeat 10 { click "Weiter"; key Escape }   # Wiederholung, z. B. für Speicherwachstum
+scroll 5                   # notches, negative = up
+wait 2                     # seconds
+wait-idle                  # until no frame/layout change any more (time limit)
+mark "Import"              # phase mark (+ view tree + screenshot)
+repeat 10 { click "Weiter"; key Escape }   # repetition, e.g. for memory growth
 screenshot "name"
 '''
 

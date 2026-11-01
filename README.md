@@ -30,7 +30,7 @@ Configuration: options win over the environment variables `ATL_DOCTOR_PREFIX`, `
 
 ```
 atl-doctor check --prefix ~/.local/opt/atl            # what can be measured on this machine
-atl-doctor scan app.apk --atl-src ~/atl-src           # static coverage of an APK, nothing is started
+atl-doctor scan --prefix ~/.local/opt/atl --atl-src ~/atl-src app.apk   # static coverage, nothing is started
 atl-doctor record -o run1 --prefix ~/.local/opt/atl app.apk   # record until the app ends (or Ctrl-C)
 atl-doctor mark -d run1 "Settings open"               # from another terminal: start a new phase
 atl-doctor report run1                                # text report on stdout

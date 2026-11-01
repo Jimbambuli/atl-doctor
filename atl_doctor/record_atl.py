@@ -7,6 +7,7 @@ import errno
 import os
 import re
 import select
+import shlex
 import signal
 import subprocess
 import threading
@@ -291,6 +292,10 @@ def record_atl(opts: RecordOptions) -> int:
     if opts.headless and wheel is None:
         _warn(f"wheel-shim unavailable: {WHEEL_SHIM} not found; scroll N scrolls smoothly instead of in notches")
     cmd, extra_env = build_command(opts, cap, plugin, agent, trace=counter is not None, wheel=wheel)
+    from .cli import log
+
+    log(1, f"helpers: agent {agent or '-'}, tracecount {counter or '-'}, jvmti plugin {plugin or '-'}, wheel {wheel or '-'}")
+    log(1, "command: " + shlex.join(cmd))
     trees = "ATL_VIEWDUMP" in extra_env
     if trees:
         cap.path(TREES).mkdir()

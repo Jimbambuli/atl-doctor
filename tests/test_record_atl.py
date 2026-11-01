@@ -466,3 +466,11 @@ def test_headless_without_kwin_exit_3_before_the_capture(tmp_prefix, apk, tmp_pa
     c = tmp_path / "c"
     assert main(["record", "--headless", "-o", str(c), "--prefix", str(tmp_prefix), str(apk)]) == 3
     assert "kwin_wayland" in capsys.readouterr().err and not c.exists()
+
+
+def test_verbose_shows_helpers_and_atl_command(tmp_prefix, apk, tmp_path, capsys):
+    assert main(["record", "-o", str(tmp_path / "a"), "--prefix", str(tmp_prefix), str(apk)]) == 0
+    assert "command:" not in capsys.readouterr().err
+    assert main(["record", "-v", "-o", str(tmp_path / "b"), "--prefix", str(tmp_prefix), str(apk)]) == 0
+    err = capsys.readouterr().err
+    assert f"command: {tmp_prefix}/bin/android-translation-layer " in err and "helpers: agent " in err

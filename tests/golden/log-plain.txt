@@ -1,0 +1,47 @@
+Environment
+  mode: log
+  phases: plain
+
+Fix first
+  2469dbfd   60  System.exit(3)  [1x, first: plain]
+      -> Fix the crash first; later findings may be consequences.
+  53ac4e33   60  fatal signal SIGSEGV  [1x, first: plain]
+      -> Fix the crash first; later findings may be consequences.
+  b91a9cf1   60  uncaught java.lang.IllegalStateException: bad state N at X  [1x, first: plain]
+      -> Fix the crash first; later findings may be consequences.
+  19772411   60  missing native method android.graphics.Foo#nativeBar  [1x, first: plain]
+      -> Implement android.graphics.Foo.nativeBar in ATL (src/api-impl).
+  56efda6e   60  missing method android.media.ThumbnailUtils#createImageThumbnail(Ljava/io/File;Landroid/util/Size;Landroid/os/CancellationSignal;)Landroid/graphics/Bitmap;  [1x, first: plain]
+      -> Implement android.media.ThumbnailUtils.createImageThumbnail in ATL (src/api-impl).
+  4e1bd825   60  missing field android.view.View#FLAG_X  [1x, first: plain]
+      -> Implement android.view.View.FLAG_X in ATL (src/api-impl).
+  65d16d92   60  missing class androidx.missing.Thing  [1x, first: plain]
+      -> Implement androidx.missing.Thing in ATL (src/api-impl).
+
+Hit stubs
+  48c3b730    0  AssetManager: AssetManager.destroy(): STUB  [1x, first: plain]
+      -> Implement the stubbed method logged by AssetManager.
+  4ab4393d    0  Bar: Method foo is unimplemented  [1x, first: plain]
+      -> Implement the stubbed method logged by Bar.
+
+Missing methods/classes
+  19772411   60  missing native method android.graphics.Foo#nativeBar  [1x, first: plain]
+      -> Implement android.graphics.Foo.nativeBar in ATL (src/api-impl).
+  56efda6e   60  missing method android.media.ThumbnailUtils#createImageThumbnail(Ljava/io/File;Landroid/util/Size;Landroid/os/CancellationSignal;)Landroid/graphics/Bitmap;  [1x, first: plain]
+      -> Implement android.media.ThumbnailUtils.createImageThumbnail in ATL (src/api-impl).
+  4e1bd825   60  missing field android.view.View#FLAG_X  [1x, first: plain]
+      -> Implement android.view.View.FLAG_X in ATL (src/api-impl).
+  65d16d92   60  missing class androidx.missing.Thing  [1x, first: plain]
+      -> Implement androidx.missing.Thing in ATL (src/api-impl).
+
+Exceptions
+  only ATL
+    58e81fe8    0  java.lang.ArrayIndexOutOfBoundsException: Index N out of bounds for length N  [1x, first: plain]
+
+Crashes
+  2469dbfd   60  System.exit(3)  [1x, first: plain]
+      -> Fix the crash first; later findings may be consequences.
+  53ac4e33   60  fatal signal SIGSEGV  [1x, first: plain]
+      -> Fix the crash first; later findings may be consequences.
+  b91a9cf1   60  uncaught java.lang.IllegalStateException: bad state N at X  [1x, first: plain]
+      -> Fix the crash first; later findings may be consequences.

@@ -43,7 +43,7 @@ _SIGNAL = re.compile(r"Fatal signal (\d+) \((SIG[A-Z]+)\)")
 _EXIT = re.compile(r"System\.exit\((-?\d+)\)")
 _STUB_WORDS = ("stub", "not implemented", "unimplemented")
 
-SUGGEST_MISSING = "Implement {cls}.{name} in ATL (src/api-impl)."
+SUGGEST_MISSING = "Implement {what} in ATL (src/api-impl)."
 SUGGEST_STUBLOG = "Implement the stubbed method logged by {tag}."
 SUGGEST_CRASH = "Fix the crash first; later findings may be consequences."
 
@@ -60,7 +60,7 @@ def parse_log_text(text: str, phase_index: int, phase: str, side: str = "atl") -
         return [Occurrence(phase, phase_index, side, 1, f"line {n}")]
 
     def add_missing(key: str, title: str, cls: str, name: str, n: int, native: bool = False) -> None:
-        f = Finding("missing", key, Klass.MISSING, title, SUGGEST_MISSING.format(cls=cls, name=name), occ(n))
+        f = Finding("missing", key, Klass.MISSING, title, SUGGEST_MISSING.format(what=f"{cls}.{name}" if name else cls), occ(n))
         if native:
             f.details["native"] = True
         out.append(f)

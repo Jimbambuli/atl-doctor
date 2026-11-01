@@ -85,3 +85,31 @@ def test_agent_memory_lines_on_host_jvm(built, tmp_path):
     assert [x[2] for x in m] == ["0", "1"] and all(int(x[3]) > 0 and int(x[5]) >= 0 for x in m)
     c = [x for x in rows if x[0] == "C" and x[2] == "1"]
     assert 0 < len(c) <= 50 and any(x[3] == "[I" and int(x[4]) >= 1000 for x in c)
+
+
+def test_agent_exception_line_with_very_long_method_names(built, tmp_path):
+    """E line: a catcher name longer than the line buffer, and many frames with 1000-character names."""
+    import subprocess
+    java, javac = shutil.which("java"), shutil.which("javac")
+    if not java or not javac:
+        pytest.skip("no JDK")
+    catcher, frame = "c" * 20000, "f" * 1000
+    (tmp_path / "Main.java").write_text(
+        "public class Main {\n"
+        f"  static void {frame}(int d) {{ if (d == 0) throw new IllegalStateException(\"x\"); {frame}(d - 1); }}\n"
+        f"  static void {catcher}() {{ try {{ {frame}(30); }} catch (IllegalStateException e) {{}} }}\n"
+        "  public static void main(String[] a) {\n"
+        f"    {catcher}();\n"
+        f"    try {{ {frame}(30); }} catch (IllegalStateException e) {{}} }} }}\n")
+    subprocess.run([javac, "-d", str(tmp_path), str(tmp_path / "Main.java")], check=True, capture_output=True)
+    out = tmp_path / "agent.tsv"
+    r = subprocess.run(["nice", "-n", "19", java, "-cp", str(tmp_path),
+                        f"-agentpath:{built / 'libatl_doctor_agent.so'}={out},nolc", "Main"],
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr
+    raw = out.read_bytes()
+    assert raw.endswith(b"\n") and b"\0" not in raw
+    lines = raw.decode().splitlines()
+    e = [ln for ln in lines if ln.startswith("E\t") and "IllegalStateException" in ln]
+    assert len(e) == 2 and all(len(ln) < 16384 for ln in e)
+    assert all(ln[0] in "EILCHMGP" and ln[1] == "\t" for ln in lines)

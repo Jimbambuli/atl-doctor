@@ -160,13 +160,16 @@ static void JNICALL cb_exception(jvmtiEnv *je, JNIEnv *jni, jthread th, jmethodI
 	}
 	(*jni)->DeleteLocalRef(jni, ek);
 	struct mc *cm = catch_m ? method(catch_m) : NULL;
+	/* snprintf returns the wanted length: cut at the buffer, keep one byte for the newline */
 	n = (size_t)snprintf(buf, sizeof buf, "E\t%lld\t%d\t%s\t%s\t%s\t", (long long)now_us(), tid(), type, msg,
 	                     cm ? cm->txt : "UNCAUGHT");
+	if (n > sizeof buf - 2) n = sizeof buf - 2;
 	jvmtiFrameInfo fr[24]; jint cnt = 0;
 	if ((*J)->GetStackTrace(J, th, 0, 24, fr, &cnt) == JVMTI_ERROR_NONE) {
 		for (jint i = 0; i < cnt && n < sizeof buf - 600; i++) {
 			struct mc *e = method(fr[i].method);
 			n += (size_t)snprintf(buf + n, sizeof buf - n, "%s%s%s", i ? "|" : "", (e && e->boot) ? "B:" : "", e ? e->txt : "?");
+			if (n > sizeof buf - 2) n = sizeof buf - 2;
 		}
 	}
 	buf[n++] = '\n'; emit(buf, n);

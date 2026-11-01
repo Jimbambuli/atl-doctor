@@ -194,8 +194,15 @@ def record_android(opts: RecordOptions) -> int:
         (perf / f"gfxinfo-{name}.txt").write_text(adb.shell("dumpsys", "gfxinfo", pkg, "framestats"), encoding="utf-8")
         adb.shell("dumpsys", "gfxinfo", pkg, "reset")
 
+    def meminfo(index: int | str) -> None:
+        from .sources.memory import parse_meminfo, write_memory_rows
+
+        write_memory_rows(cap, [(index, "android", k, v)
+                                for k, v in parse_meminfo(adb.shell("dumpsys", "meminfo", pkg)).items()])
+
     def on_mark(mk: Mark) -> None:
         gfxinfo(f"{mk.index:02d}")
+        meminfo(mk.index)
         if lib:  # the agent watches this file (memory per phase)
             line = f"{mk.index}\t{mk.boot_us}\t{mk.wall_us}\t{mk.name}"
             adb.shell(f"printf '%s\\n' {shlex.quote(line)} >> /data/data/{pkg}/atl-doctor-marks.tsv")
@@ -245,6 +252,7 @@ def record_android(opts: RecordOptions) -> int:
                     _warn(f"{stop.by}: stopping the app")
                 if pids:
                     gfxinfo("end")
+                    meminfo("end")
                 if stop.by is not None or steps_state.get("done"):
                     adb.shell("am", "force-stop", pkg)
             finally:

@@ -280,3 +280,25 @@ def test_steps_without_input_helper_exit_3(tmp_prefix, apk, tmp_path, monkeypatc
     steps = tmp_path / "s.steps"
     steps.write_text('key Escape\n')
     assert main(["record", "--steps", str(steps), "-o", str(tmp_path / "c"), "--prefix", str(tmp_prefix), str(apk)]) == 3
+
+
+def test_memory_rows_per_mark(tmp_prefix, apk, tmp_path):
+    c = tmp_path / "c"
+    t, res = _record_in_thread(["record", "-o", str(c), "--prefix", str(tmp_prefix), str(apk), "--", "--wait"])
+    try:
+        assert wait_for(lambda: (c / "control").exists())
+        assert main(["mark", "-d", str(c), "Open"]) == 0
+        assert wait_for(lambda: (c / "memory.tsv").is_file())
+    finally:
+        wait_for(lambda: "atl_pid" in Capture(c).read_manifest().environment)
+        os.kill(int(Capture(c).read_manifest().environment["atl_pid"]), signal.SIGTERM)
+        t.join(20)
+    rows = [ln.split("\t") for ln in (c / "memory.tsv").read_text().splitlines()]
+    assert {(r[0], r[1], r[2]) for r in rows} >= {("1", "atl", "pss"), ("1", "atl", "anon"), ("1", "atl", "native_heap")}
+    assert all(r[3].isdigit() for r in rows)
+
+
+def test_build_command_heap():
+    opts = RecordOptions(apk=Path("/x/app.apk"), out=None, prefix=Path("/p"), atl_src=None, agent=None, heap=True)
+    cmd, _ = build_command(opts, Capture(Path("/c")), Path("/p/lib64/art/libopenjdkjvmti.so"), Path("/h/a.so"))
+    assert cmd[-1].endswith(",frames,hang=100,heap")

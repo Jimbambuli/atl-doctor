@@ -63,7 +63,7 @@ def build_command(opts: RecordOptions, cap: Capture, plugin: Path | None, agent:
                 "-X", f"-Xmethod-trace-file:{c}/{TRACE_DIR}/{TRACE_FILE}"]
     if plugin and agent:
         cmd += ["-X", f"-agentpath:{agent}={c}/{AGENT},late={plugin},latesec=3,marks={c}/{MARKS},arm={c}/{ARM_FILE}"
-                      f",frames,hang={HANG_MS}"]
+                      f",frames,hang={HANG_MS}" + (",heap" if opts.heap else "")]
     env = {"LD_LIBRARY_PATH": f"{opts.prefix}/lib64:{opts.prefix}/lib64/art"}
     if has_viewdump(opts.prefix):
         env["ATL_VIEWDUMP"] = f"{c}/{TREES}"
@@ -142,6 +142,13 @@ def drain_control(cap: Capture, ctl: int, buf: bytearray, clock: Callable[[], in
         if not data:
             return new
         new += _handle_control(cap, data, buf, clock)
+
+
+def _memory(cap: Capture, pid: int, index: int | str) -> None:
+    from .sources.memory import smaps_snapshot, write_memory_rows
+
+    snap = smaps_snapshot(Path(f"/proc/{pid}"))
+    write_memory_rows(cap, [(index, "atl", k, v) for k, v in snap.items()])
 
 
 def tree_name(mark: Mark) -> str:
@@ -326,13 +333,17 @@ def _record_loop(cap: Capture, proc: subprocess.Popen, stop: _Stop, ctl: int, tr
         if ready:
             try:
                 for mk in _handle_control(cap, os.read(ctl, 4096), buf):
+                    _memory(cap, proc.pid, mk.index)
                     if trees:
                         _request_tree(cap, mk)
             except BlockingIOError:
                 pass
     for mk in drain_control(cap, ctl, buf):  # a mark sent by the last step
+        _memory(cap, proc.pid, mk.index)
         if trees:
             _request_tree(cap, mk)
+    if proc.poll() is None:
+        _memory(cap, proc.pid, "end")
     if stop.by is not None:
         _warn(f"{stop.by}: stopping ATL")
     if stop.by is not None or (steps_state.get("done") and proc.poll() is None):
@@ -409,7 +420,7 @@ def _run_record(args: argparse.Namespace) -> int:
     atl_src = resolve(args.atl_src, "ATL_DOCTOR_ATL_SRC")
     opts = RecordOptions(apk=Path(args.apk), out=Path(args.output) if args.output else None, prefix=Path(prefix),
                          atl_src=Path(atl_src) if atl_src else None, agent=Path(args.agent) if args.agent else None,
-                         headless=args.headless, steps=Path(args.steps) if args.steps else None,
+                         headless=args.headless, steps=Path(args.steps) if args.steps else None, heap=args.heap,
                          atl_args=list(args.atl_args))
     return record_atl(opts)
 
@@ -429,6 +440,8 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--headless", action="store_true",
                    help="run ATL in a private invisible KWin session (kwin_wayland --virtual)")
     p.add_argument("--steps", metavar="FILE", help="drive the app with a step file; implies --headless under ATL")
+    p.add_argument("--heap", action="store_true",
+                   help="count instances and bytes per class at every mark (agent; slow, forces a GC per mark)")
     p.add_argument("--android", action="store_true",
                    help="record the same app on an Android device over adb (own capture directory)")
     p.add_argument("apk", metavar="APK")

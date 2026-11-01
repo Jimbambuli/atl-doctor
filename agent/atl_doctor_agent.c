@@ -16,6 +16,8 @@
  *        marks=FILE    marks file of the capture (index\tboot_us\twall_us\tname), watched by later probes
  *        frames        frame times from the GDK frame clock of every toplevel window (GTK looked up with dlsym;
  *                      without GTK, e.g. on Android, one I line "frames unavailable")
+ *        heap          with marks=: at every mark force a GC and count instances and bytes per class (C lines,
+ *                      50 largest classes) and the JNI global references (M lines); slow
  *        hang=MS       main-thread hangs: a watchdog samples the main thread's Java stack every 20 ms; a blockade
  *                      is an unbroken run of samples deeper than the idle depth (smallest depth seen) longer than MS
  *
@@ -31,6 +33,9 @@
  *        frame (0 if unknown, CLOCK_MONOTONIC)
  *   G  t pause_us     one garbage collection (GarbageCollectionStart to Finish)
  *   H  t tid duration_ms frame0|frame1|...   main thread blocked; stack sampled when the blockade passed hang=MS
+ *   M  t mark_index java_used_bytes java_total_bytes jni_globals   at every new line of marks=FILE
+ *        (Runtime.totalMemory()-freeMemory(); jni_globals only with heap, else -1)
+ *   C  t mark_index class instances bytes   with heap: the 50 classes with the most bytes at that mark
  */
 #define _GNU_SOURCE
 #include <jvmti.h>
@@ -52,7 +57,7 @@ static uint8_t opt_ex = 1, opt_lc = 1;
 static volatile uint8_t lc_active;
 static char opt_arm[512], opt_late[512], opt_marks[512];
 static uint32_t opt_latesec = 20;
-static uint8_t opt_frames;
+static uint8_t opt_frames, opt_heap;
 static uint32_t opt_hang_ms;
 static __thread uint8_t in_callback;   /* recursion guard per thread */
 
@@ -87,6 +92,7 @@ static void info(const char *fmt, const char *a) {
 
 static void start_agent_thread(JNIEnv *jni, const char *name, jvmtiStartFunction fn);
 static void JNICALL hang_watchdog(jvmtiEnv *je, JNIEnv *jni, void *arg);
+static void JNICALL marks_watcher(jvmtiEnv *je, JNIEnv *jni, void *arg);
 
 /* ---------- method cache: jmethodID -> "pkg.Class.name" ---------- */
 #define MC_N 262144
@@ -329,6 +335,7 @@ static void JNICALL cb_vm_init(jvmtiEnv *je, JNIEnv *jni, jthread th) {
 	else if (opt_lc) start_agent_thread(jni, "atl-doctor-arm", wait_for_arm);
 	if (opt_ex) (*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_EXCEPTION, NULL);
 	if (opt_hang_ms) start_agent_thread(jni, "atl-doctor-hang", hang_watchdog);
+	if (opt_marks[0]) start_agent_thread(jni, "atl-doctor-marks", marks_watcher);
 	if ((*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_START, NULL) == JVMTI_ERROR_NONE)
 		(*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_FINISH, NULL);
 	else info("gc pauses unavailable%s", "");
@@ -471,6 +478,96 @@ static void JNICALL hang_watchdog(jvmtiEnv *je, JNIEnv *jni, void *arg) {
 		}
 	}
 }
+/* ---------- memory per mark: watches marks=FILE ---------- */
+#define TOP_CLASSES 50
+static int64_t jni_global_count;
+static jint JNICALL count_jni_global(jvmtiHeapReferenceKind kind, const jvmtiHeapReferenceInfo *info, jlong class_tag,
+                                     jlong referrer_class_tag, jlong size, jlong *tag_ptr, jlong *referrer_tag_ptr,
+                                     jint length, void *user_data) {
+	(void)info; (void)class_tag; (void)referrer_class_tag; (void)size; (void)tag_ptr; (void)referrer_tag_ptr;
+	(void)length; (void)user_data;
+	if (kind == JVMTI_HEAP_REFERENCE_JNI_GLOBAL) jni_global_count++;
+	return 0;   /* do not follow: only the roots are of interest */
+}
+struct class_stat { int64_t instances, bytes; };
+static struct class_stat *cstats;
+static jint JNICALL count_object(jlong class_tag, jlong size, jlong *tag_ptr, jint length, void *user_data) {
+	(void)tag_ptr; (void)length;
+	int64_t n = *(int64_t *)user_data;
+	if (class_tag > 0 && class_tag <= n) { cstats[class_tag - 1].instances++; cstats[class_tag - 1].bytes += size; }
+	return 0;
+}
+static void heap_classes(JNIEnv *jni, uint32_t mark) {
+	jint n = 0; jclass *ks = NULL;
+	if ((*J)->GetLoadedClasses(J, &n, &ks) != JVMTI_ERROR_NONE) return;
+	cstats = calloc((size_t)n, sizeof *cstats);
+	for (jint i = 0; cstats && i < n; i++) (*J)->SetTag(J, ks[i], (jlong)i + 1);
+	int64_t total = n;
+	jvmtiHeapCallbacks hc; memset(&hc, 0, sizeof hc); hc.heap_iteration_callback = count_object;
+	if (cstats && (*J)->IterateThroughHeap(J, 0, NULL, &hc, &total) == JVMTI_ERROR_NONE) {
+		for (uint32_t k = 0; k < TOP_CLASSES; k++) {   /* the largest classes by bytes, one at a time */
+			int64_t best = -1;
+			for (jint i = 0; i < n; i++)
+				if (cstats[i].instances && (best < 0 || cstats[i].bytes > cstats[best].bytes)) best = i;
+			if (best < 0) break;
+			char name[512], b[700]; class_name(ks[best], name, sizeof name);
+			int32_t len = snprintf(b, sizeof b, "C\t%lld\t%u\t%s\t%lld\t%lld\n", (long long)now_us(), mark, name,
+			                       (long long)cstats[best].instances, (long long)cstats[best].bytes);
+			if (len > (int32_t)sizeof b - 1) { len = sizeof b - 1; b[len - 1] = '\n'; }
+			emit(b, (size_t)len);
+			cstats[best].instances = 0;
+		}
+	} else info("heap: class counting failed%s", "");
+	free(cstats); cstats = NULL;
+	for (jint i = 0; i < n; i++) (*jni)->DeleteLocalRef(jni, ks[i]);
+	(*J)->Deallocate(J, (unsigned char *)ks);
+}
+static void memory_line(JNIEnv *jni, uint32_t mark) {
+	if (opt_heap) {
+		(*J)->ForceGarbageCollection(J);
+		heap_classes(jni, mark);
+	}
+	int64_t used = -1, total = -1, globals = -1;
+	jclass rk = (*jni)->FindClass(jni, "java/lang/Runtime");
+	jmethodID get = rk ? (*jni)->GetStaticMethodID(jni, rk, "getRuntime", "()Ljava/lang/Runtime;") : NULL;
+	jobject rt = get ? (*jni)->CallStaticObjectMethod(jni, rk, get) : NULL;
+	if (rt) {
+		jlong t = (*jni)->CallLongMethod(jni, rt, (*jni)->GetMethodID(jni, rk, "totalMemory", "()J"));
+		jlong f = (*jni)->CallLongMethod(jni, rt, (*jni)->GetMethodID(jni, rk, "freeMemory", "()J"));
+		total = t; used = t - f;
+		(*jni)->DeleteLocalRef(jni, rt);
+	}
+	(*jni)->ExceptionClear(jni);
+	if (rk) (*jni)->DeleteLocalRef(jni, rk);
+	if (opt_heap) {
+		jvmtiHeapCallbacks hc; memset(&hc, 0, sizeof hc); hc.heap_reference_callback = count_jni_global;
+		jni_global_count = 0;
+		if ((*J)->FollowReferences(J, 0, NULL, NULL, &hc, NULL) == JVMTI_ERROR_NONE) globals = jni_global_count;
+	}
+	char b[160];
+	int32_t len = snprintf(b, sizeof b, "M\t%lld\t%u\t%lld\t%lld\t%lld\n", (long long)now_us(), mark,
+	                       (long long)used, (long long)total, (long long)globals);
+	emit(b, (size_t)len);
+}
+/* every complete new line of the marks file: index\tboot_us\twall_us\tname */
+static void JNICALL marks_watcher(jvmtiEnv *je, JNIEnv *jni, void *arg) {
+	(void)je; (void)arg;
+	int64_t done = 0;   /* bytes of the marks file already handled */
+	for (;;) {
+		FILE *f = fopen(opt_marks, "r");
+		if (f) {
+			char line[1024];
+			if (fseek(f, done, SEEK_SET) == 0)
+				while (fgets(line, sizeof line, f) && strchr(line, '\n')) {
+					done += (int64_t)strlen(line);
+					memory_line(jni, (uint32_t)strtoul(line, NULL, 10));
+				}
+			fclose(f);
+		}
+		sleep_ms(250);
+	}
+}
+
 static void start_agent_thread(JNIEnv *jni, const char *name, jvmtiStartFunction fn) {
 	jclass tk = (*jni)->FindClass(jni, "java/lang/Thread");
 	jobject thr = tk ? (*jni)->NewObject(jni, tk, (*jni)->GetMethodID(jni, tk, "<init>", "(Ljava/lang/String;)V"),
@@ -511,6 +608,7 @@ static jint start(JavaVM *vm, char *options) {
 		else if (!strncmp(o, "latesec=", 8)) opt_latesec = (uint32_t)strtoul(o + 8, NULL, 10);
 		else if (!strncmp(o, "marks=", 6)) snprintf(opt_marks, sizeof opt_marks, "%s", o + 6);
 		else if (!strcmp(o, "frames")) opt_frames = 1;
+		else if (!strcmp(o, "heap")) opt_heap = 1;
 		else if (!strncmp(o, "hang=", 5)) opt_hang_ms = (uint32_t)strtoul(o + 5, NULL, 10);
 		else snprintf(unknown, sizeof unknown, "%s", o);
 		o = nx;
@@ -542,6 +640,11 @@ static jint setup_env(JavaVM *vm) {
 	jvmtiCapabilities g; memset(&g, 0, sizeof g);
 	g.can_generate_garbage_collection_events = 1;
 	(*J)->AddCapabilities(J, &g);   /* optional: without it the GC events cannot be enabled (I line then) */
+	if (opt_heap) {
+		jvmtiCapabilities h; memset(&h, 0, sizeof h);
+		h.can_tag_objects = 1;
+		if ((*J)->AddCapabilities(J, &h) != JVMTI_ERROR_NONE) info("heap: cannot tag objects, no class counts%s", "");
+	}
 	jvmtiEventCallbacks cb; memset(&cb, 0, sizeof cb);
 	cb.VMInit = cb_vm_init; cb.Exception = cb_exception; cb.Breakpoint = cb_breakpoint; cb.ClassPrepare = cb_class_prepare;
 	cb.GarbageCollectionStart = cb_gc_start; cb.GarbageCollectionFinish = cb_gc_finish;

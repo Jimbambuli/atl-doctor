@@ -11,7 +11,7 @@ import math
 from collections import defaultdict
 
 from ..capture import Mark, phase_of
-from ..findings import Finding, Klass, Occurrence
+from ..findings import Finding, Klass, Occurrence, normalize_text
 from .exceptions import AgentEvent
 from .log import is_platform_frame
 
@@ -118,6 +118,7 @@ def perf_findings(atl: dict[int, list[float]], android: dict[int, list[float]] |
         if any(f.startswith(PROBE_FRAMES) for f in stack):
             continue
         top, app = _hang_frame(stack)
+        top = normalize_text(top)  # like exceptions: lambda numbers differ between runs
         ms = int(h.fields[0])
         f = by_frame.get(top)
         if f is None:

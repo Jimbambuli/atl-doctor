@@ -152,3 +152,10 @@ def test_request_atl_tree_serialised(tmp_path):
     stop.set()
     h.join()
     assert res["01-Main"] and res["step-001"]
+
+
+def test_node_key_without_id_ignores_numbers_in_the_text():
+    from atl_doctor.sources.tree import Node, _key
+    a = Node("", "android.widget.TextView", "3 new messages", "", (0, 0, 1, 1), True)
+    b = Node("", "android.widget.TextView", "12 new messages", "", (0, 0, 1, 1), True)
+    assert _key(a) == _key(b) == "TextView[N new messages]"

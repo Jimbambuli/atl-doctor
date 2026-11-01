@@ -185,3 +185,11 @@ def test_report_option_jank_min_frames(tmp_path, capsys):
     r = run("--jank-min-frames", "3")
     assert [f["id"] for f in r["findings"] if f["kind"] == "jank"] == ["jank:Import"]
     assert main(["report", "--jank-min-frames", "0", str(tmp_path / "atl")]) == 2
+
+
+def test_hang_key_is_normalized_like_exceptions():
+    """Lambda numbers differ between builds and runs: the same blocking frame must give one finding."""
+    marks = [Mark(0, 0, 0, "start")]
+    hs = [AgentEvent("H", 1_000_000, 1, ["300", f"org.example.demo.Main${n}.run"]) for n in (3, 7)]
+    fs = [f for f in perf_findings({}, None, hs, [], marks) if f.kind == "hang"]
+    assert len(fs) == 1 and fs[0].key == "org.example.demo.Main$N.run"

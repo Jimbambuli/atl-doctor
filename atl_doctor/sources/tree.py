@@ -18,7 +18,7 @@ from pathlib import Path
 
 from ..capture import Mark
 from ..errors import DoctorError
-from ..findings import Finding, Klass, Occurrence
+from ..findings import Finding, Klass, Occurrence, normalize_text
 
 OPAQUE = ("android.webkit.WebView", "androidx.compose.ui.platform.AndroidComposeView",
           "androidx.compose.ui.platform.ComposeView")
@@ -249,7 +249,7 @@ def pair_nodes(android: list[Node], atl: list[Node]) -> list[tuple[Node | None, 
 def _key(n: Node) -> str:
     if n.rid:
         return n.rid
-    return f"{_norm_class(n.real_cls or n.cls)}[{(n.text or n.desc)[:40]}]"
+    return f"{_norm_class(n.real_cls or n.cls)}[{normalize_text(n.text or n.desc)[:40]}]"  # "3 new" = "5 new"
 
 
 def _r(n: Node) -> list[float]:

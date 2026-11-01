@@ -274,6 +274,10 @@ def _int(s: str | None) -> int | None:
     return int(s) if s and s.isdigit() else None
 
 
+# what damaged DEX/AXML data raises while it is parsed (lazily, after read_apk)
+PARSE_ERRORS = (struct.error, IndexError, ValueError)
+
+
 def read_apk(path: Path) -> ApkInfo:
     path = Path(path)
     try:
@@ -286,8 +290,10 @@ def read_apk(path: Path) -> ApkInfo:
                 raise DoctorError(f"not an APK: {path.name}: no classes.dex")
             manifest = parse_axml(z.read("AndroidManifest.xml"))
             dexes = [Dex(z.read(n)) for n in dex_names]
-    except (zipfile.BadZipFile, ValueError, struct.error, OSError, NotImplementedError, EOFError) as e:
+    except (zipfile.BadZipFile, OSError, NotImplementedError, EOFError) as e:
         raise DoctorError(f"not an APK: {path.name}: {e}") from e
+    except PARSE_ERRORS as e:
+        raise DoctorError(f"unreadable APK: {path.name}: {e}") from e
     abis = sorted({n.split("/")[1] for n in names if n.startswith("lib/") and n.endswith(".so") and n.count("/") >= 2})
     return ApkInfo(path, manifest.get("package"), manifest.get("versionName"), manifest.get("versionCode"),
                    _int(manifest.get("minSdkVersion")), _int(manifest.get("targetSdkVersion")), abis, dex_names, dexes)

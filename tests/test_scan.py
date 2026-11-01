@@ -156,3 +156,48 @@ def test_cli_json_and_html(prefix, tmp_path):
     html = (tmp_path / "s.html").read_text()
     assert "Coverage" in html and "ThumbnailUtils" in html
     assert main(base + ["-f", "html", str(good)]) == 2
+
+
+def test_damaged_dex_is_skipped_not_a_traceback(state, tmp_path):
+    """150 randomly damaged classes.dex: each APK is scanned or skipped with a reason, the next one still runs."""
+    import random
+    import zipfile
+
+    good = apk(tmp_path, "good.apk", ["View.setAlpha", "Drawable.parseBlendMode", "ThumbnailUtils.createImageThumbnail"])
+    with zipfile.ZipFile(good) as z:
+        manifest, dex = z.read("AndroidManifest.xml"), z.read("classes.dex")
+    rnd = random.Random(1)
+    paths = []
+    for i in range(150):
+        d = bytearray(dex)
+        for _ in range(rnd.randint(1, 16)):
+            d[rnd.randrange(8, len(d))] = rnd.randrange(256)  # keep the magic: the damage is inside
+        if i % 5 == 0:
+            d = d[:rnd.randrange(112, len(d))]               # truncated after the header
+        p = tmp_path / f"bad{i}.apk"
+        with zipfile.ZipFile(p, "w") as z:
+            z.writestr("AndroidManifest.xml", manifest)
+            z.writestr("classes.dex", bytes(d))
+        paths.append(p)
+    rep = scan_many(paths + [good], [state], None)
+    skipped = rep.extras["skipped"]
+    assert all(s["reason"].startswith(("unreadable APK: ", "not an APK: ")) for s in skipped)
+    assert len(skipped) + len(rep.extras["apps"]["main"]) == 151
+    assert rep.extras["apps"]["main"][-1]["package"] == "org.example.good"
+    assert len(skipped) > 50                                 # the damage is really seen
+
+
+def test_report_with_damaged_dex_notes_it_in_environment(tmp_path, capsys):
+    from atl_doctor.capture import Capture, Manifest
+
+    bad = tmp_path / "bad.apk"
+    make_apk(bad, [make_dex([cls("Lorg/example/Main;", calls=[("invoke-virtual", REFS["View.setAlpha"])])])[:120]])
+    cap = Capture.create(tmp_path / "c", "atl")
+    m = cap.read_manifest()
+    m.apk = str(bad)
+    cap.write_manifest(m)
+    (cap.root / "trace").mkdir(exist_ok=True)
+    from atl_doctor.sources.stubs import _TSV_HEAD
+    (cap.root / "trace/stubs.tsv").write_text("\t".join(_TSV_HEAD) + "\n")
+    assert main(["report", str(cap.root)]) == 0
+    assert "unreadable, stub results not checked" in capsys.readouterr().out

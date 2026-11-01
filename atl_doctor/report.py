@@ -378,7 +378,7 @@ def build_capture_report(path: Path, jank_min_frames: int = JANK_MIN_FRAMES) -> 
     from .capture import TRACE_DIR, Capture
     from .sources import load_capture_findings
     from .env import atl_jars
-    from .sources.dex import framework_result_uses, read_apk, result_used_refs
+    from .sources.dex import PARSE_ERRORS, framework_result_uses, read_apk, result_used_refs
     from .sources.stubs import load_stub_tsv
 
     cap = Capture.open(path)
@@ -395,12 +395,12 @@ def build_capture_report(path: Path, jank_min_frames: int = JANK_MIN_FRAMES) -> 
     if entries is not None:
         try:
             used = result_used_refs(read_apk(Path(m.apk)))
-        except DoctorError as e:
+        except (DoctorError, *PARSE_ERRORS) as e:
             env["apk"] = f"{m.apk} (unreadable, stub results not checked: {e})"
         prefix = m.environment.get("prefix")
         try:
             used |= framework_result_uses(atl_jars(Path(prefix)) if prefix else [])  # ATL's own callers count too
-        except DoctorError as e:
+        except (DoctorError, *PARSE_ERRORS) as e:
             env["atl_jars"] = f"unreadable, ATL's own use of stub results not checked: {e}"
     notes: list[str] = []
     phases, findings = load_capture_findings(cap, entries, used, jank_min_frames, notes)

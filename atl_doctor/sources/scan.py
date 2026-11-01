@@ -11,7 +11,7 @@ from pathlib import Path
 from ..env import atl_jars, libcore_jars, resolve
 from ..errors import DoctorError, PrerequisiteMissing, UsageError
 from ..findings import Finding, Klass, Occurrence, merge, to_dict
-from .dex import ApkInfo, Ref, World, read_apk, framework_refs, result_used_refs
+from .dex import PARSE_ERRORS, ApkInfo, Ref, World, read_apk, framework_refs, result_used_refs
 from .stubs import STUB_KINDS, StubEntry, build_stub_list, stub_finding, stub_index
 
 COMPOSE_MIN = 100
@@ -167,10 +167,14 @@ def scan_many(paths: list[Path], states: list[AtlState], sdk_int: int | None):
         except DoctorError as e:
             skipped.append({"apk": Path(p).name, "reason": str(e)})
             continue
+        try:  # the DEX is parsed here, a damaged one fails only now
+            results = [(s, scan_apk(apk, s, sdk_int)) for s in states]
+        except PARSE_ERRORS as e:
+            skipped.append({"apk": Path(p).name, "reason": f"unreadable APK: {Path(p).name}: {e}"})
+            continue
         if apk.target_sdk is not None:
             histogram[str(apk.target_sdk)] += 1
-        for s in states:
-            cov, fs = scan_apk(apk, s, sdk_int)
+        for s, (cov, fs) in results:
             apps[s.name].append(asdict(cov))
             per_state[s.name] += fs
     merged = {name: merge(fs) for name, fs in per_state.items()}

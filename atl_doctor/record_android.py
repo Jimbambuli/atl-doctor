@@ -21,6 +21,7 @@ from .record_atl import RecordOptions, _handle_control, drain_control, _start_st
 DEVICE_DIR = "/data/local/tmp/atl-doctor"
 DEVICE_TREE = "/sdcard/atl-doctor.xml"
 LOGCAT_RAW = "logcat.txt"
+PERF_DIR = "perf"
 START_TIMEOUT_S = 60.0
 ARM_AFTER_S = 5.0
 POLL_S = 1.0
@@ -186,7 +187,15 @@ def record_android(opts: RecordOptions) -> int:
     pids: set[str] = set()
     steps_state: dict = {}
 
+    def gfxinfo(name: str) -> None:
+        """Frame stats of the phase that just ended, then a fresh count for the next one."""
+        perf = cap.path(PERF_DIR)
+        perf.mkdir(exist_ok=True)
+        (perf / f"gfxinfo-{name}.txt").write_text(adb.shell("dumpsys", "gfxinfo", pkg, "framestats"), encoding="utf-8")
+        adb.shell("dumpsys", "gfxinfo", pkg, "reset")
+
     def on_mark(mk: Mark) -> None:
+        gfxinfo(f"{mk.index:02d}")
         if lib:  # the agent watches this file (memory per phase)
             line = f"{mk.index}\t{mk.boot_us}\t{mk.wall_us}\t{mk.name}"
             adb.shell(f"printf '%s\\n' {shlex.quote(line)} >> /data/data/{pkg}/atl-doctor-marks.tsv")
@@ -204,7 +213,7 @@ def record_android(opts: RecordOptions) -> int:
                     from .steps import AndroidDriver
                     steps_state = _start_steps(cap, AndroidDriver(serial, cap, pkg, density or 1.0), steps,
                                                str(opts.steps))
-                buf, last_poll, armed = bytearray(), 0.0, False
+                buf, last_poll, armed, counting = bytearray(), 0.0, False, False
                 while stop.by is None and not steps_state.get("done"):
                     now = time.monotonic()
                     if now - last_poll >= POLL_S:
@@ -213,6 +222,9 @@ def record_android(opts: RecordOptions) -> int:
                         pids |= set(running)
                         if not running and (pids or now - started > START_TIMEOUT_S):
                             break  # the app ended (or never started)
+                        if running and not counting:
+                            adb.shell("dumpsys", "gfxinfo", pkg, "reset")  # frame stats per phase from here on
+                            counting = True
                         if lib and pids and not armed and now - started >= ARM_AFTER_S:
                             adb.shell("touch", f"/data/data/{pkg}/atl-doctor-armed")
                             armed = True
@@ -231,6 +243,8 @@ def record_android(opts: RecordOptions) -> int:
                     on_mark(mk)
                 if stop.by is not None:
                     _warn(f"{stop.by}: stopping the app")
+                if pids:
+                    gfxinfo("end")
                 if stop.by is not None or steps_state.get("done"):
                     adb.shell("am", "force-stop", pkg)
             finally:

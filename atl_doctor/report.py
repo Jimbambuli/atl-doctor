@@ -303,6 +303,7 @@ def build_pair_report(atl_dir: Path, android_dir: Path, density: float | None) -
     from .record_atl import tree_name
     from .sources import load_capture_findings
     from .sources.exceptions import phases_by_name, compare_sides, lifecycle_findings, lifecycle_sequence, parse_agent
+    from .sources.perf import android_phase_frames, frame_stats
     from .sources.tree import load_tree, tree_findings
 
     r, root = build_capture_report(atl_dir)
@@ -335,6 +336,12 @@ def build_pair_report(atl_dir: Path, android_dir: Path, density: float | None) -
             else:
                 trees[f.id] = f
     findings += trees.values()
+    and_frames = android_phase_frames(acap)
+    atl_to_android = {i: pairs[k] for k, i in phases_by_name(atl_names).items() if k in pairs}
+    for f in findings:  # Android frame times as comparison values of the ATL jank findings
+        if f.kind == "jank":
+            j = atl_to_android.get(f.occurrences[0].phase_index)
+            f.details["android"] = frame_stats(and_frames[j]) if j in and_frames else None
     r.findings = findings
     r.environment["android_capture"] = str(android_dir)
     if density is None and trees:

@@ -103,6 +103,8 @@ def test_record_android_flow_with_fake_adb(adb, apk, tmp_path, capsys):
     c = calls(adb)
     assert any(x.startswith("install -r ") for x in c)
     assert "shell uiautomator dump /sdcard/atl-doctor.xml" in c
+    assert "shell dumpsys gfxinfo org.example.demo reset" in c
+    assert "shell dumpsys gfxinfo org.example.demo framestats" in c and (out / "perf/gfxinfo-01.txt").is_file()
     assert "shell setprop wrap.org.example.demo /data/local/tmp/atl-doctor/wrap.sh" in c
     assert [x for x in c if x.startswith("shell setprop wrap.")][-1] == 'shell setprop wrap.org.example.demo ""'
     m = Capture.open(out).read_manifest()

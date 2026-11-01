@@ -10,8 +10,9 @@ from ..capture import Mark, phase_of
 from ..findings import Finding, Klass, Occurrence, normalize_text
 from .log import SUGGEST_CRASH, is_platform_frame
 
-# columns per line tag, including tag, time and thread id
-COLUMNS = {"E": 7, "L": 9, "I": 4}
+# columns per line tag, including tag and time; tags in WITH_TID have the thread id as third column
+COLUMNS = {"E": 7, "L": 9, "I": 4, "P": 5, "G": 3, "H": 5}
+WITH_TID = {"E", "L", "I", "H"}
 
 
 @dataclass
@@ -30,10 +31,11 @@ def parse_agent(path: Path) -> list[AgentEvent]:
     out, bad = [], 0
     for ln in lines:
         f = ln.split("\t")
-        if COLUMNS.get(f[0]) != len(f) or not f[1].isdigit() or not f[2].lstrip("-").isdigit():
+        tid = f[0] in WITH_TID
+        if COLUMNS.get(f[0]) != len(f) or not f[1].isdigit() or (tid and not f[2].lstrip("-").isdigit()):
             bad += 1
             continue
-        out.append(AgentEvent(f[0], int(f[1]), int(f[2]), f[3:]))
+        out.append(AgentEvent(f[0], int(f[1]), int(f[2]), f[3:]) if tid else AgentEvent(f[0], int(f[1]), 0, f[2:]))
     if bad:
         out.append(AgentEvent("I", 0, 0, [f"skipped {bad} malformed lines"]))
     return out

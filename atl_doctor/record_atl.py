@@ -23,6 +23,7 @@ from .headless import APP_HEIGHT, APP_WIDTH, HeadlessSession
 from .sources.trace import write_watch_file
 
 ARM_FILE = "armed"
+HANG_MS = 100     # main thread blocked longer than this is a hang (Spec 6.4)
 RUN_DIR = "run"  # private KWin session: socket, D-Bus address, logs, input helper FIFO
 ARM_AFTER_S = 5.0
 STOP_GRACE_S = 10.0
@@ -61,7 +62,8 @@ def build_command(opts: RecordOptions, cap: Capture, plugin: Path | None, agent:
         cmd += ["-X", "-Xmethod-trace", "-X", "-Xmethod-trace-stream",
                 "-X", f"-Xmethod-trace-file:{c}/{TRACE_DIR}/{TRACE_FILE}"]
     if plugin and agent:
-        cmd += ["-X", f"-agentpath:{agent}={c}/{AGENT},late={plugin},latesec=3,marks={c}/{MARKS},arm={c}/{ARM_FILE}"]
+        cmd += ["-X", f"-agentpath:{agent}={c}/{AGENT},late={plugin},latesec=3,marks={c}/{MARKS},arm={c}/{ARM_FILE}"
+                      f",frames,hang={HANG_MS}"]
     env = {"LD_LIBRARY_PATH": f"{opts.prefix}/lib64:{opts.prefix}/lib64/art"}
     if has_viewdump(opts.prefix):
         env["ATL_VIEWDUMP"] = f"{c}/{TREES}"
@@ -169,7 +171,8 @@ def make_atl_driver(cap: Capture, session: HeadlessSession, opts: RecordOptions,
     with open(run / "input.log", "wb") as log:
         proc = subprocess.Popen([str(helper), "serve", str(fifo), str(status)], env={**os.environ, **session.env()},
                                 stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-    d = AtlDriver(cap, session, fifo, status, has_viewdump(opts.prefix), frames=False, package=package)
+    frames = jvmti_plugin(opts.prefix) is not None and find_helper(AGENT_LIB, opts.agent, opts.prefix) is not None
+    d = AtlDriver(cap, session, fifo, status, has_viewdump(opts.prefix), frames=frames, package=package)
     close = d.close
 
     def close_all() -> None:

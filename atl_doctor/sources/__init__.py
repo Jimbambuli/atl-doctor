@@ -6,6 +6,7 @@ from ..capture import AGENT, ATL_LOG, TRACE_DIR, Capture
 from ..findings import Finding, Klass, Occurrence, merge
 from .exceptions import exception_findings, parse_agent
 from .log import SUGGEST_CRASH, parse_log_text
+from .perf import atl_frame_intervals, perf_findings
 from .stubs import StubEntry
 from .trace import read_counter_output, stub_findings
 
@@ -27,9 +28,13 @@ def load_capture_findings(cap: Capture, entries: list[StubEntry] | None,
         found += stub_findings(hits, entries, marks, result_used)
     agent_ids: set[str] = set()
     if cap.path(AGENT).is_file():
-        exc = exception_findings(parse_agent(cap.path(AGENT)), marks, m.side)
+        events = parse_agent(cap.path(AGENT))
+        exc = exception_findings(events, marks, m.side)
         agent_ids = {f.id for f in exc}
         found += exc
+        if m.side == "atl":  # Android frame times are only for comparison (report DIR ANDROID-DIR)
+            found += perf_findings(atl_frame_intervals(events, marks), None, [e for e in events if e.tag == "H"],
+                                   [e for e in events if e.tag == "G"], marks)
     if cap.path(ATL_LOG).is_file():
         text = cap.path(ATL_LOG).read_bytes().decode("utf-8", "replace")
         _, logged = parse_log_text(text, 0, phases[0] if phases else "start", m.side)

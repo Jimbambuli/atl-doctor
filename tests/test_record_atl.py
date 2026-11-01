@@ -159,7 +159,7 @@ def test_build_command_contains_trace_and_agent(tmp_path):
     assert cmd == ["/p/bin/android-translation-layer", "/x/app.apk", "--sdk-int", "34",
                    "-X", "-Xmethod-trace", "-X", "-Xmethod-trace-stream", "-X", f"-Xmethod-trace-file:{c}/trace/trace.bin",
                    "-X", f"-agentpath:/h/libatl_doctor_agent.so={c}/agent.tsv,late=/p/lib64/art/libopenjdkjvmti.so,"
-                         f"latesec=3,marks={c}/marks.tsv,arm={c}/armed"]
+                         f"latesec=3,marks={c}/marks.tsv,arm={c}/armed,frames,hang=100"]
     assert env == {"LD_LIBRARY_PATH": "/p/lib64:/p/lib64/art"}
     cmd, _ = build_command(opts, cap, None, Path("/h/libatl_doctor_agent.so"))
     assert not any(a.startswith("-agentpath") for a in cmd)

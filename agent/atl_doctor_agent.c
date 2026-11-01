@@ -14,6 +14,10 @@
  *                      runtime stays non-debuggable and fast; exceptions work, breakpoints are best effort
  *        latesec=N     delay for late= (default 20)
  *        marks=FILE    marks file of the capture (index\tboot_us\twall_us\tname), watched by later probes
+ *        frames        frame times from the GDK frame clock of every toplevel window (GTK looked up with dlsym;
+ *                      without GTK, e.g. on Android, one I line "frames unavailable")
+ *        hang=MS       main-thread hangs: a watchdog samples the main thread's Java stack every 20 ms; a blockade
+ *                      is an unbroken run of samples deeper than the idle depth (smallest depth seen) longer than MS
  *
  * Output (one line per event, tab separated, fixed column count, t = CLOCK_BOOTTIME in us):
  *   E  t tid type message catcher|UNCAUGHT frame0|frame1|...   every thrown exception (24 frames, "B:" = boot class)
@@ -22,6 +26,11 @@
  *        override; super()/wrapper chains with the same name count once). V: breakpoint only in android.view.View
  *        (onAttachedToWindow & co. must call super), receiver = concrete view class
  *   I  t tid text     info (breakpoints set, errors)
+ *   P  t frame_counter frame_time_us presentation_us   one painted frame: frame_time_us = duration from the start
+ *        of the frame clock cycle (before-paint) to after-paint; presentation_us = presentation time of the previous
+ *        frame (0 if unknown, CLOCK_MONOTONIC)
+ *   G  t pause_us     one garbage collection (GarbageCollectionStart to Finish)
+ *   H  t tid duration_ms frame0|frame1|...   main thread blocked; stack sampled when the blockade passed hang=MS
  */
 #define _GNU_SOURCE
 #include <jvmti.h>
@@ -43,6 +52,8 @@ static uint8_t opt_ex = 1, opt_lc = 1;
 static volatile uint8_t lc_active;
 static char opt_arm[512], opt_late[512], opt_marks[512];
 static uint32_t opt_latesec = 20;
+static uint8_t opt_frames;
+static uint32_t opt_hang_ms;
 static __thread uint8_t in_callback;   /* recursion guard per thread */
 
 static int64_t now_us(void) {
@@ -50,6 +61,11 @@ static int64_t now_us(void) {
 	return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
 static int32_t tid(void) { return (int32_t)syscall(SYS_gettid); }
+static int64_t mono_us(void) {
+	struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+static void sleep_ms(uint32_t ms) { struct timespec ts = { ms / 1000, (int64_t)(ms % 1000) * 1000000 }; nanosleep(&ts, NULL); }
 
 static void emit(const char *s, size_t n) { if (out_fd >= 0) { ssize_t r = write(out_fd, s, n); (void)r; } }
 
@@ -68,6 +84,9 @@ static void info(const char *fmt, const char *a) {
 	b[n++] = '\n';
 	emit(b, (size_t)n);
 }
+
+static void start_agent_thread(JNIEnv *jni, const char *name, jvmtiStartFunction fn);
+static void JNICALL hang_watchdog(jvmtiEnv *je, JNIEnv *jni, void *arg);
 
 /* ---------- method cache: jmethodID -> "pkg.Class.name" ---------- */
 #define MC_N 262144
@@ -307,14 +326,157 @@ static void JNICALL cb_vm_init(jvmtiEnv *je, JNIEnv *jni, jthread th) {
 	(*jni)->ExceptionClear(jni);
 	info("vm_init%s", "");
 	if (opt_lc && !opt_arm[0]) { lc_active = 1; arm(jni); }
-	else if (opt_lc) {
-		jclass tk = (*jni)->FindClass(jni, "java/lang/Thread");
-		jobject thr = (*jni)->NewObject(jni, tk, (*jni)->GetMethodID(jni, tk, "<init>", "(Ljava/lang/String;)V"),
-		                                (*jni)->NewStringUTF(jni, "atl-doctor-arm"));
-		if (thr) (*J)->RunAgentThread(J, thr, wait_for_arm, NULL, JVMTI_THREAD_NORM_PRIORITY);
-		(*jni)->ExceptionClear(jni);
-	}
+	else if (opt_lc) start_agent_thread(jni, "atl-doctor-arm", wait_for_arm);
 	if (opt_ex) (*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_EXCEPTION, NULL);
+	if (opt_hang_ms) start_agent_thread(jni, "atl-doctor-hang", hang_watchdog);
+	if ((*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_START, NULL) == JVMTI_ERROR_NONE)
+		(*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_FINISH, NULL);
+	else info("gc pauses unavailable%s", "");
+}
+
+/* ---------- frame times (GDK frame clock, GTK looked up at run time) ---------- */
+/* GLib/GTK types are not included: pointers stay void *, gboolean is a 32-bit int, gulong is 64 bits wide on the
+   64-bit Linux targets where GTK exists (on Android dlsym finds nothing and nothing is called) */
+typedef int32_t (*g_source_fn)(void *);
+static uint32_t (*p_g_idle_add)(g_source_fn, void *);
+static uint64_t (*p_g_signal_connect_data)(void *, const char *, void (*)(void *, void *), void *, void *, uint32_t);
+static void *(*p_gtk_window_list_toplevels)(void);          /* GList * of GtkWindow, container owned by us */
+static void (*p_g_list_free)(void *);
+static void *(*p_gtk_widget_get_frame_clock)(void *);
+static int64_t (*p_gdk_frame_clock_get_frame_counter)(void *);
+static void *(*p_gdk_frame_clock_get_timings)(void *, int64_t);
+static int32_t (*p_gdk_frame_timings_get_complete)(void *);
+static int64_t (*p_gdk_frame_timings_get_presentation_time)(void *);
+struct g_list { void *data; struct g_list *next, *prev; };   /* GList layout */
+#define CLOCKS_N 64
+static void *clocks[CLOCKS_N];
+static int64_t cycle_start[CLOCKS_N];   /* CLOCK_MONOTONIC us of the clock's last before-paint (frame start) */
+static uint32_t clocks_n;
+
+static int32_t clock_index(void *clock) {
+	for (uint32_t i = 0; i < clocks_n; i++) if (clocks[i] == clock) return (int32_t)i;
+	return -1;
+}
+static void cycle_begins(void *clock, void *data) {
+	(void)data;
+	int32_t i = clock_index(clock);
+	if (i >= 0) cycle_start[i] = mono_us();
+}
+
+static void after_paint(void *clock, void *data) {
+	(void)data;
+	int64_t n = p_gdk_frame_clock_get_frame_counter(clock);
+	int32_t i = clock_index(clock);
+	int64_t dur = i >= 0 && cycle_start[i] ? mono_us() - cycle_start[i] : 0, pres = 0;
+	void *prev = p_gdk_frame_clock_get_timings(clock, n - 1);
+	if (prev && p_gdk_frame_timings_get_complete(prev)) pres = p_gdk_frame_timings_get_presentation_time(prev);
+	char b[128];
+	int32_t len = snprintf(b, sizeof b, "P\t%lld\t%lld\t%lld\t%lld\n", (long long)now_us(), (long long)n,
+	                       (long long)(dur > 0 ? dur : 0), (long long)pres);
+	emit(b, (size_t)len);
+}
+/* main thread (g_idle_add): connect after-paint of every new frame clock */
+static int32_t hook_clocks(void *data) {
+	(void)data;
+	void *list = p_gtk_window_list_toplevels();
+	for (struct g_list *l = list; l; l = l->next) {
+		void *clock = p_gtk_widget_get_frame_clock(l->data);
+		if (clock && clock_index(clock) < 0 && clocks_n < CLOCKS_N) {
+			clocks[clocks_n++] = clock;
+			p_g_signal_connect_data(clock, "before-paint", cycle_begins, NULL, NULL, 0);
+			p_g_signal_connect_data(clock, "after-paint", after_paint, NULL, NULL, 0);
+		}
+	}
+	p_g_list_free(list);
+	return 0;   /* G_SOURCE_REMOVE */
+}
+#define SYM(v, name) (*(void **)&(v) = dlsym(RTLD_DEFAULT, name))
+static void *frames_thread(void *arg) {
+	(void)arg;
+	if (!SYM(p_g_idle_add, "g_idle_add") || !SYM(p_g_signal_connect_data, "g_signal_connect_data")
+	    || !SYM(p_gtk_window_list_toplevels, "gtk_window_list_toplevels") || !SYM(p_g_list_free, "g_list_free")
+	    || !SYM(p_gtk_widget_get_frame_clock, "gtk_widget_get_frame_clock")
+	    || !SYM(p_gdk_frame_clock_get_frame_counter, "gdk_frame_clock_get_frame_counter")
+	    || !SYM(p_gdk_frame_clock_get_timings, "gdk_frame_clock_get_timings")
+	    || !SYM(p_gdk_frame_timings_get_complete, "gdk_frame_timings_get_complete")
+	    || !SYM(p_gdk_frame_timings_get_presentation_time, "gdk_frame_timings_get_presentation_time")) {
+		info("frames unavailable: no GTK in the process%s", "");
+		return NULL;
+	}
+	info("frames: GDK frame clock%s", "");
+	for (;;) { p_g_idle_add(hook_clocks, NULL); sleep_ms(1000); }
+	return NULL;
+}
+
+/* ---------- garbage collection pauses ---------- */
+static volatile int64_t gc_start;
+static void JNICALL cb_gc_start(jvmtiEnv *je) { (void)je; gc_start = now_us(); }
+static void JNICALL cb_gc_finish(jvmtiEnv *je) {
+	(void)je;
+	int64_t t = now_us(), s0 = gc_start;
+	if (!s0) return;
+	char b[96]; int32_t n = snprintf(b, sizeof b, "G\t%lld\t%lld\n", (long long)t, (long long)(t - s0));
+	emit(b, (size_t)n);
+}
+
+/* ---------- main-thread hangs: watchdog samples the Java stack of the thread "main" ---------- */
+#define HANG_SAMPLE_MS 20
+static jthread find_main(JNIEnv *jni) {
+	jint n = 0; jthread *ts = NULL; jthread found = NULL;
+	if ((*J)->GetAllThreads(J, &n, &ts) != JVMTI_ERROR_NONE) return NULL;
+	for (jint i = 0; i < n; i++) {
+		jvmtiThreadInfo ti; memset(&ti, 0, sizeof ti);
+		if (!found && (*J)->GetThreadInfo(J, ts[i], &ti) == JVMTI_ERROR_NONE && ti.name && !strcmp(ti.name, "main"))
+			found = (*jni)->NewGlobalRef(jni, ts[i]);
+		if (ti.name) (*J)->Deallocate(J, (unsigned char *)ti.name);
+		(*jni)->DeleteLocalRef(jni, ts[i]);
+	}
+	(*J)->Deallocate(J, (unsigned char *)ts);
+	return found;
+}
+static void JNICALL hang_watchdog(jvmtiEnv *je, JNIEnv *jni, void *arg) {
+	(void)je; (void)arg;
+	jthread main_t = find_main(jni);
+	if (!main_t) { info("hang: no thread named main%s", ""); return; }
+	char z[32]; snprintf(z, sizeof z, "%u ms", opt_hang_ms); info("hang: watchdog %s", z);
+	int32_t idle = -1; int64_t since = 0; uint8_t over = 0;
+	static char stack[16384]; size_t sn = 0;
+	for (;;) {
+		sleep_ms(HANG_SAMPLE_MS);
+		jvmtiFrameInfo fr[24]; jint cnt = 0, depth = 0;
+		if ((*J)->GetFrameCount(J, main_t, &depth) != JVMTI_ERROR_NONE) return;   /* thread gone */
+		int64_t t = now_us();
+		if (idle < 0 || depth <= idle) {   /* back at (or below) the idle depth: blockade over */
+			if (over) {
+				char b[16512];
+				int32_t n = snprintf(b, sizeof b, "H\t%lld\t%d\t%lld\t%s\n", (long long)t, (int32_t)getpid(),
+				                     (long long)((t - since) / 1000), stack);
+				if (n > (int32_t)sizeof b - 1) { n = sizeof b - 1; b[n - 1] = '\n'; }
+				emit(b, (size_t)n);
+			}
+			if (idle < 0 || depth < idle) idle = depth;   /* idle depth = smallest depth seen */
+			since = 0; over = 0;
+			continue;
+		}
+		if (!since) since = t;
+		if (!over && t - since >= (int64_t)opt_hang_ms * 1000
+		    && (*J)->GetStackTrace(J, main_t, 0, 24, fr, &cnt) == JVMTI_ERROR_NONE) {
+			sn = 0; stack[0] = 0;
+			for (jint i = 0; i < cnt && sn < sizeof stack - 600; i++) {
+				struct mc *e = method(fr[i].method);
+				sn += (size_t)snprintf(stack + sn, sizeof stack - sn, "%s%s%s", i ? "|" : "", (e && e->boot) ? "B:" : "",
+				                       e ? e->txt : "?");
+			}
+			over = 1;
+		}
+	}
+}
+static void start_agent_thread(JNIEnv *jni, const char *name, jvmtiStartFunction fn) {
+	jclass tk = (*jni)->FindClass(jni, "java/lang/Thread");
+	jobject thr = tk ? (*jni)->NewObject(jni, tk, (*jni)->GetMethodID(jni, tk, "<init>", "(Ljava/lang/String;)V"),
+	                                      (*jni)->NewStringUTF(jni, name)) : NULL;
+	if (thr) (*J)->RunAgentThread(J, thr, fn, NULL, JVMTI_THREAD_NORM_PRIORITY);
+	(*jni)->ExceptionClear(jni);
 }
 
 static jint setup_env(JavaVM *vm);
@@ -348,6 +510,8 @@ static jint start(JavaVM *vm, char *options) {
 		else if (!strncmp(o, "late=", 5)) snprintf(opt_late, sizeof opt_late, "%s", o + 5);
 		else if (!strncmp(o, "latesec=", 8)) opt_latesec = (uint32_t)strtoul(o + 8, NULL, 10);
 		else if (!strncmp(o, "marks=", 6)) snprintf(opt_marks, sizeof opt_marks, "%s", o + 6);
+		else if (!strcmp(o, "frames")) opt_frames = 1;
+		else if (!strncmp(o, "hang=", 5)) opt_hang_ms = (uint32_t)strtoul(o + 5, NULL, 10);
 		else snprintf(unknown, sizeof unknown, "%s", o);
 		o = nx;
 	}
@@ -356,6 +520,7 @@ static jint start(JavaVM *vm, char *options) {
 	if (out_fd < 0) { perror(path); return JNI_ERR; }
 	if (unknown[0]) info("unknown option %s", unknown);
 	if (opt_marks[0]) info("marks %s", opt_marks);
+	if (opt_frames) { pthread_t t; pthread_create(&t, NULL, frames_thread, NULL); pthread_detach(t); }
 	if (opt_late[0]) {
 		pthread_t t; pthread_create(&t, NULL, late_thread, vm); pthread_detach(t);
 		info("loaded, plugin later %s", opt_late);
@@ -374,8 +539,12 @@ static jint setup_env(JavaVM *vm) {
 		info("AddCapabilities failed, retrying without local variables%s", "");
 		c.can_access_local_variables = 0; (*J)->AddCapabilities(J, &c);
 	}
+	jvmtiCapabilities g; memset(&g, 0, sizeof g);
+	g.can_generate_garbage_collection_events = 1;
+	(*J)->AddCapabilities(J, &g);   /* optional: without it the GC events cannot be enabled (I line then) */
 	jvmtiEventCallbacks cb; memset(&cb, 0, sizeof cb);
 	cb.VMInit = cb_vm_init; cb.Exception = cb_exception; cb.Breakpoint = cb_breakpoint; cb.ClassPrepare = cb_class_prepare;
+	cb.GarbageCollectionStart = cb_gc_start; cb.GarbageCollectionFinish = cb_gc_finish;
 	(*J)->SetEventCallbacks(J, &cb, sizeof cb);
 	(*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_VM_INIT, NULL);
 	(*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_CLASS_PREPARE, NULL);

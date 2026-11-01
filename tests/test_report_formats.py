@@ -96,3 +96,16 @@ def test_truncated_capture_reports(tmp_path, capsys):
     assert "recording did not finish cleanly" in capsys.readouterr().out
     assert main(["report", "-f", "json", str(cap)]) == 0
     assert "crash:aborted-recording" in capsys.readouterr().out
+
+
+def test_output_into_missing_directory_is_one_line(tmp_path, capsys):
+    assert main(["report", "-o", str(tmp_path / "nope/x.txt"), CAP]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("atl-doctor: cannot write ") and "Traceback" not in err
+
+
+def test_log_and_capture_directory_exclude_each_other(tmp_path, capsys):
+    log = tmp_path / "a.log"
+    log.write_text("")
+    assert main(["report", "--log", str(log), CAP]) == 2
+    assert "--log and a capture directory exclude each other" in capsys.readouterr().err

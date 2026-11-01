@@ -220,7 +220,10 @@ def _run_scan(args: argparse.Namespace) -> int:
 
     text = {"text": render_text, "json": render_json, "html": render_html}[args.format](rep)
     if args.output:
-        Path(args.output).write_text(text, encoding="utf-8")
+        try:
+            Path(args.output).write_text(text, encoding="utf-8")
+        except OSError as e:
+            raise DoctorError(f"cannot write {args.output}: {e.strerror or e}") from e
     else:
         sys.stdout.write(text)
     return 1 if rep.extras["skipped"] else 0

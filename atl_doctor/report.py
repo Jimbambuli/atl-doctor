@@ -298,7 +298,10 @@ def _emit(args: argparse.Namespace, r: Report, capture_dir: Path | None) -> int:
     text = {"text": lambda: render_text(r), "json": lambda: render_json(r),
             "html": lambda: render_html(r, capture_dir)}[args.format]()
     if args.output:
-        Path(args.output).write_text(text, encoding="utf-8")
+        try:
+            Path(args.output).write_text(text, encoding="utf-8")
+        except OSError as e:
+            raise DoctorError(f"cannot write {args.output}: {e.strerror or e}") from e
     else:
         sys.stdout.write(text)
     return EXIT_FOUND if any(f.klass in fail for f in r.findings) else 0
@@ -311,6 +314,8 @@ ENV_KEYS = ("package", "version_name", "version_code", "atl_commit", "art_commit
 def _run_report(args: argparse.Namespace) -> int:
     if not args.log and not args.dirs:
         raise UsageError("report needs --log FILE or a capture directory")
+    if args.log and args.dirs:
+        raise UsageError("--log and a capture directory exclude each other")
     if not args.log:
         return _report_capture(args)
     from .sources.log import parse_logs

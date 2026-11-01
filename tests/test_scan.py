@@ -156,6 +156,7 @@ def test_cli_json_and_html(prefix, tmp_path):
     html = (tmp_path / "s.html").read_text()
     assert "Coverage" in html and "ThumbnailUtils" in html
     assert main(base + ["-f", "html", str(good)]) == 2
+    assert main(base + ["-o", str(tmp_path / "nope/s.txt"), str(good)]) == 1  # one line on stderr, no traceback
 
 
 def test_damaged_dex_is_skipped_not_a_traceback(state, tmp_path):

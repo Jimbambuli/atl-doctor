@@ -42,6 +42,13 @@ view tree, slow frames, hangs and memory growth.
 Findings are ranked by what to fix first and carry a stable ID, so two reports can be compared with
 .BR "atl-doctor diff" .
 .PP
+A hit stub whose AOSP method is just as trivial (same empty body, same returned value or the parameter
+returned unchanged, e.g. \fBView.isInEditMode\fR returning false) is not a gap in ATL: it is marked "like AOSP"
+(\fBdetails.like_aosp\fR in json), left out of "Hit stubs" and "Fix first" and listed once under "Notes".
+The comparison uses the tree given with \fB\-\-aosp\fR; without one, or for what that tree lacks, a bundled
+list of trivial methods of the AOSP base classes (platform SDK 34, only names and patterns, made with
+\fItools/gen\-aosp\-defaults.py\fR) is used.
+.PP
 Results go to standard output, messages to standard error.
 The tool never asks questions and never opens a browser.
 If an optional probe is missing, one line on standard error says so and the recording goes on without it;

@@ -50,6 +50,7 @@ class StubEntry:
     location: str  # "src/...:line"
     bytecode_kind: str
     comment: str
+    ret: str = ""  # returned value (empty0/const: expression, returnsarg: parameter index); "" = unknown/none
 
 
 # ---------------------------------------------------------------- Java scanner
@@ -131,6 +132,28 @@ def kind_of(body_m: str, body_raw: str, ctor: bool, params: str = "") -> str | N
     if r and r.group(1) in names:
         return "returnsarg"
     return None
+
+
+TRIVIAL_KINDS = ("empty", "empty0", "emptythis", "const", "returnsarg")
+
+
+def trivial_pattern(body_m: str, params: str = "") -> tuple[str, str] | None:
+    """(kind, returned value) of a trivial body (masked source), None if the body is real code or a stub marker.
+
+    Two methods with the same pattern behave the same: `return false;` and `return false;`, but not
+    `return 0;` and `return 1;`.  returnsarg: the value is the index of the returned parameter."""
+    kd = kind_of(body_m, "", False, params)
+    if kd not in TRIVIAL_KINDS:
+        return None
+    b = re.sub(r"\s+", " ", body_m).strip()
+    if kd in ("empty0", "const"):
+        m = re.fullmatch(r"return\s*\(?\s*(.*?)\s*\)?\s*;", b)
+        return kd, re.sub(r"\s+", "", m.group(1)) if m else ""
+    if kd == "returnsarg":
+        names = re.findall(r"(\w+)\s*(?:\[\s*\])*\s*(?:,|$)", params.strip())
+        m = re.fullmatch(r"return\s*\(?\s*(\w+)\s*\)?\s*;", b)
+        return kd, str(names.index(m.group(1))) if m and m.group(1) in names else ""
+    return kd, ""
 
 
 def _simple(t: str) -> str:
@@ -227,21 +250,23 @@ def walk_methods(m: str) -> Iterator[MethodSpan]:
         k += 1
 
 
-def java_methods(root: Path, rel: str) -> Iterator[tuple[str, str, str, list[str], int, str]]:
-    """yield (kind, class, method, simple param types, line, stub-text comment) for stub-like methods of one file"""
+def java_methods(root: Path, rel: str) -> Iterator[tuple[str, str, str, list[str], int, str, str]]:
+    """yield (kind, class, method, simple param types, line, stub-text comment, returned value) for the
+    stub-like methods of one file"""
     src = (root / rel).read_text(encoding="utf-8", errors="replace")
     m, comments = mask(src)
     lines = [0] + [k + 1 for k, ch in enumerate(src) if ch == "\n"]
     for s in walk_methods(m):
         line = bisect.bisect_right(lines, s.head)
         if s.native:
-            yield ("native", s.cls, s.name, _params(s.params), line, "")
+            yield ("native", s.cls, s.name, _params(s.params), line, "", "")
             continue
         kd = kind_of(m[s.open + 1:s.close], src[s.open + 1:s.close], s.ctor, s.params)
         if kd:
             com = "".join(c for o, c in comments if s.open < o < s.close)
             note = re.sub(r"\s+", " ", com).strip()[:120] if STUBTEXT.search(com) else ""
-            yield (kd, s.cls, s.name, _params(s.params), line, note)
+            pat = trivial_pattern(m[s.open + 1:s.close], s.params)
+            yield (kd, s.cls, s.name, _params(s.params), line, note, pat[1] if pat and pat[0] == kd else "")
 
 
 # ---------------------------------------------------------------- C side
@@ -387,7 +412,7 @@ def build_stub_list(atl_src: Path, jars: list[Path]) -> list[StubEntry]:
     for sub in ("api-impl", "ghax", "gstub"):
         for f in sorted((root / sub).rglob("*.java")):
             rel = str(f.relative_to(atl_src))
-            for kd, cls, name, ps, line, note in java_methods(atl_src, rel):
+            for kd, cls, name, ps, line, note, ret in java_methods(atl_src, rel):
                 cands = dexm.get((cls, name), [])
                 same_arity = [c for c in cands if len(c[0]) == len(ps)]
                 hit = ([c for c in cands if c[0] == ps] or [c for c in cands if _norm(c[0]) == _norm(ps)]
@@ -401,12 +426,12 @@ def build_stub_list(atl_src: Path, jars: list[Path]) -> list[StubEntry]:
                         kd = "native-" + c[0]
                     else:
                         continue
-                entries.append(StubEntry(kd, cls, name, sig, f"{rel}:{line}", bc, note))
+                entries.append(StubEntry(kd, cls, name, sig, f"{rel}:{line}", bc, note, ret))
     return entries
 
 
 # ---------------------------------------------------------------- TSV and index
-_TSV_HEAD = ("kind", "class", "method", "sig", "location", "bytecode_kind", "comment")
+_TSV_HEAD = ("kind", "class", "method", "sig", "location", "bytecode_kind", "comment", "ret")
 
 
 def save_stub_tsv(entries: list[StubEntry], path: Path) -> None:
@@ -414,17 +439,18 @@ def save_stub_tsv(entries: list[StubEntry], path: Path) -> None:
         f.write("\t".join(_TSV_HEAD) + "\n")
         for e in entries:
             f.write("\t".join((e.kind, e.cls, e.method, e.sig, e.location, e.bytecode_kind,
-                               e.comment.replace("\t", " ").replace("\n", " "))) + "\n")
+                               e.comment.replace("\t", " ").replace("\n", " "), e.ret.replace("\t", " "))) + "\n")
 
 
 def load_stub_tsv(path: Path) -> list[StubEntry]:
     lines = Path(path).read_text(encoding="utf-8").split("\n")
-    if not lines or tuple(lines[0].split("\t")) != _TSV_HEAD:
+    head = tuple(lines[0].split("\t")) if lines else ()
+    if head not in (_TSV_HEAD, _TSV_HEAD[:7]):  # lists written before the ret column are still readable
         raise DoctorError(f"not a stub list: {path}")
     out = []
     for ln in lines[1:]:
         if ln:
-            f = (ln.split("\t") + [""] * 7)[:7]
+            f = (ln.split("\t") + [""] * 8)[:8]
             out.append(StubEntry(*f))
     return out
 

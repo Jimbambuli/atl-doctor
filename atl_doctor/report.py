@@ -38,7 +38,7 @@ def _kind_in(*kinds: str) -> Callable[[Finding], bool]:
 SECTIONS: list[tuple[str, Callable[[Finding], bool]]] = [
     ("Environment", lambda f: False),
     ("Fix first", lambda f: False),
-    ("Hit stubs", _kind_in("stub", "stublog")),
+    ("Hit stubs", lambda f: f.kind in ("stub", "stublog") and not _like_aosp(f)),
     ("Missing methods/classes", _kind_in("missing")),
     ("Exceptions", _kind_in("exc")),
     ("Crashes", _kind_in("crash")),
@@ -47,6 +47,10 @@ SECTIONS: list[tuple[str, Callable[[Finding], bool]]] = [
     ("Jank and hangs", _kind_in("jank", "hang", "gc")),
     ("Memory growth", _kind_in("mem")),
 ]
+
+
+def _like_aosp(f: Finding) -> bool:
+    return bool(f.details.get("like_aosp"))
 
 
 def finding_lines(f: Finding) -> list[str]:
@@ -107,6 +111,11 @@ def _notes(r: Report) -> list[str]:
     hist = r.extras.get("target_sdk_histogram", {})
     if hist:
         extra.append("target SDK: " + ", ".join(f"{k}: {v}" for k, v in hist.items()))
+    like = [f for f in rank(r.findings) if _like_aosp(f)]
+    if like:
+        names = ", ".join(f.key for f in like[:20]) + (" ..." if len(like) > 20 else "")
+        extra.append(f"{len(like)} stub hit{'s' if len(like) > 1 else ''} behave like AOSP (trivial there as well, "
+                     f"not counted as stubs; details.like_aosp in json): {names}")
     return extra + r.extras.get("limits", [])
 
 
@@ -364,15 +373,17 @@ def _prefix_world(prefix: str | None):
 
 def apply_aosp(r: Report, aosp: str | None, prefix: str | None, stubs: dict, world=None) -> None:
     """AOSP comparison for the stub/missing findings of r; the detected version goes into the environment."""
-    from .sources.aosp import attach_aosp, open_aosp
+    from .sources.aosp import attach_aosp, attach_bundled, open_aosp
 
     path = resolve(aosp, "ATL_DOCTOR_AOSP")
     if not path:
         r.environment["aosp"] = "not given (use --aosp DIR)"
+        attach_bundled(r.findings, stubs)
         return
     tree = open_aosp(Path(path))
     world = world or _prefix_world(prefix)
     attach_aosp(r.findings, tree, world, stubs)
+    attach_bundled(r.findings, stubs)  # classes or methods the given tree lacks
     r.environment["aosp"] = str(path)
     r.environment["aosp_sdk"] = str(tree.sdk) if tree.sdk else "unknown"
     if world is None:
@@ -542,6 +553,10 @@ def render_explain(f: Finding, r: Report, capture_dir: Path | None) -> str:
     if f.details:
         out += ["", "details:", json.dumps(f.details, indent=2, sort_keys=True, ensure_ascii=False)]
     a = f.details.get("aosp")
+    if _like_aosp(f):
+        from .sources.aosp import aosp_line
+
+        out += ["", aosp_line(f) or ""]
     if "aosp" in f.details:
         out += ["", f"AOSP comparison (SDK {f.details.get('aosp_sdk') or 'unknown'}):"]
         if not a:

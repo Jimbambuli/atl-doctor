@@ -26,6 +26,9 @@ what is missing. Two optional pieces live outside this repository's build: the J
 Configuration: options win over the environment variables `ATL_DOCTOR_PREFIX`, `ATL_DOCTOR_ATL_SRC`,
 `ATL_DOCTOR_AOSP`, `ATL_DOCTOR_AGENT`; there is no configuration file.
 
+Stub hits that are just as trivial in AOSP (`View.isInEditMode` returns false there too) are marked "like AOSP" and
+not counted as stubs; see the manual page. `tools/gen-aosp-defaults.py` rebuilds the bundled list of such methods.
+
 ## Examples
 
 ```

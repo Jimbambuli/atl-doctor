@@ -270,10 +270,6 @@ _SIG_RE = re.compile(r"#[\w$<>]+(\([^)]*\)\S*)")
 
 
 # ---------------------------------------------------------------- "like AOSP": trivial there as well
-DEFAULTS_FILE = Path(__file__).resolve().parent.parent / "data" / "aosp-defaults.tsv"
-Defaults = dict[tuple[str, str, int], tuple[str, str]]  # (class, method, parameter count) -> (kind, value)
-
-
 def _same_behaviour(e: StubEntry, pat: tuple[str, str] | None) -> bool:
     """ATL's trivial body does what the trivial AOSP body does (same kind, same value)."""
     if pat is None or e.kind not in TRIVIAL_KINDS or pat[0] != e.kind:
@@ -300,56 +296,14 @@ def _like_in_tree(index: dict[str, Path], entries: list[StubEntry]) -> bool:
     return True
 
 
-def _mark_like(f: Finding, source: str) -> None:
+def _mark_like(f: Finding) -> None:
     f.details["like_aosp"] = True
-    f.details["like_aosp_source"] = source
     f.klass = Klass.OTHER  # not a gap in ATL: no weight, not in "Fix first"
 
 
 def _stub_entries(f: Finding, stubs: dict) -> list[StubEntry]:
     cls, method = f.key.split("#", 1)
     return [e for e in stubs.get((cls, method), []) if e.cls == cls]
-
-
-def load_defaults(path: Path | None = None) -> Defaults:
-    """The bundled list of trivial AOSP methods (tab separated: kind class method nparams value; # comments)."""
-    out: Defaults = {}
-    for ln in _read(Path(path) if path else DEFAULTS_FILE).split("\n"):
-        if ln and not ln.startswith(("#", "kind\t")):
-            k, c, m, n, v = (ln.split("\t") + [""] * 5)[:5]
-            out[(c, m, int(n))] = (k, v)
-    return out
-
-
-def trivial_defaults(tree: AospTree, classes: set[str]) -> Defaults:
-    """Trivial methods (non-private, with a body) of the given top-level classes in an AOSP tree, one per
-    (class, method, parameter count); ambiguous overloads of the same arity are left out."""
-    out: dict[tuple[str, str, int], tuple[str, str] | None] = {}
-    for top, path in class_index(tree).items():
-        if top not in classes:
-            continue
-        f = _load(path)
-        for s in f.methods:
-            if s.ctor or s.native or s.open < 0:
-                continue
-            key = (s.cls, s.name, len(_params(s.params)))
-            pat = trivial_pattern(f.m[s.open + 1:s.close], s.params)
-            if re.search(r"\bprivate\b", f.m[s.head:s.open]):
-                pat = None
-            out[key] = pat if out.get(key, pat) == pat else None
-    return {k: v for k, v in sorted(out.items()) if v is not None}
-
-
-def attach_bundled(findings: list[Finding], stubs: dict, defaults: Defaults | None = None) -> None:
-    """Mark stub findings that are as trivial in AOSP, by the bundled list (no AOSP source needed)."""
-    defaults = load_defaults() if defaults is None else defaults
-    for f in findings:
-        if f.kind != "stub" or "#" not in f.key or f.details.get("like_aosp"):
-            continue
-        es = _stub_entries(f, stubs)
-        if es and all(e.sig and "(" in e.sig and _same_behaviour(
-                e, defaults.get((e.cls, e.method, len(_desc_simple(e.sig[e.sig.index("(") + 1:e.sig.index(")")]))))) for e in es):
-            _mark_like(f, "bundled")
 
 
 def attach_aosp(findings: list[Finding], tree: AospTree, world: World | None, stubs: dict) -> None:
@@ -369,14 +323,13 @@ def attach_aosp(findings: list[Finding], tree: AospTree, world: World | None, st
         if f.kind == "stub" and m:
             es = _stub_entries(f, stubs)
             if es and _like_in_tree(index, es):
-                _mark_like(f, "aosp")
+                _mark_like(f)
 
 
 def aosp_line(f: Finding) -> str | None:
     """One report line for the AOSP comparison of a finding, None if it was not compared."""
     if f.details.get("like_aosp"):
-        src = "AOSP " + str(f.details.get("aosp_sdk") or "?") if f.details.get("like_aosp_source") == "aosp" else "bundled AOSP list"
-        return f"like AOSP: trivial there as well ({src}); not an ATL gap"
+        return f"like AOSP: trivial there as well (AOSP {f.details.get('aosp_sdk') or '?'}); not an ATL gap"
     if "aosp" not in f.details:
         return None
     sdk = f.details.get("aosp_sdk") or "?"

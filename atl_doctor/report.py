@@ -340,8 +340,8 @@ def _run_report(args: argparse.Namespace) -> int:
 
     entries = build_stub_list(Path(atl_src), []) if atl_src else []
     r = build_log_report([Path(p) for p in args.log], entries if atl_src else None)
-    if needs_aosp(r) or resolve(args.aosp, "ATL_DOCTOR_AOSP"):
-        apply_aosp(r, args.aosp, None, stub_index(entries))
+    if (needs_aosp(r) and atl_src) or resolve(args.aosp, "ATL_DOCTOR_AOSP"):  # no stub list: nothing to compare
+        apply_aosp(r, args.aosp, None, stub_index(entries), no_fetch=args.no_aosp_fetch)
     return _emit(args, r, None)
 
 
@@ -371,26 +371,36 @@ def _prefix_world(prefix: str | None):
     return World.from_jars(jars) if jars else None
 
 
-def apply_aosp(r: Report, aosp: str | None, prefix: str | None, stubs: dict, world=None) -> None:
-    """AOSP comparison for the stub/missing findings of r; the detected version goes into the environment."""
-    from .sources.aosp import attach_aosp, attach_bundled, open_aosp
+def apply_aosp(r: Report, aosp: str | None, prefix: str | None, stubs: dict, world=None, no_fetch: bool = False) -> None:
+    """AOSP comparison for the stub/missing findings of r; the detected version goes into the environment.
+
+    Always against real AOSP source: --aosp DIR, else the cached or freshly fetched tree (sources/aosp_fetch.py).
+    If neither is possible the report says so and the stub hits stay unfiltered."""
+    from .sources.aosp import attach_aosp, open_aosp
+    from .sources.aosp_fetch import DEFAULT_SDK, FetchError, ensure_aosp
 
     path = resolve(aosp, "ATL_DOCTOR_AOSP")
     if not path:
-        r.environment["aosp"] = "not given (use --aosp DIR)"
-        attach_bundled(r.findings, stubs)
-        return
+        why = "--no-aosp-fetch given" if no_fetch else ""
+        if not no_fetch:
+            try:
+                path = str(ensure_aosp(DEFAULT_SDK).path)
+            except FetchError as e:
+                why = str(e)
+        if not path:
+            r.environment["aosp"] = (f"AOSP comparison not possible ({why}; use --aosp DIR); "
+                                     "stub hits unfiltered")
+            return
     tree = open_aosp(Path(path))
     world = world or _prefix_world(prefix)
     attach_aosp(r.findings, tree, world, stubs)
-    attach_bundled(r.findings, stubs)  # classes or methods the given tree lacks
     r.environment["aosp"] = str(path)
     r.environment["aosp_sdk"] = str(tree.sdk) if tree.sdk else "unknown"
     if world is None:
         r.environment["aosp_deps"] = "not checked against ATL (no ATL jars; recorded prefix or $ATL_DOCTOR_PREFIX)"
 
 
-def _apply_capture_aosp(r: Report, root: Path, aosp: str | None) -> None:
+def _apply_capture_aosp(r: Report, root: Path, aosp: str | None, no_fetch: bool = False) -> None:
     from .capture import TRACE_DIR, Capture
     from .sources.stubs import load_stub_tsv, stub_index
 
@@ -399,7 +409,7 @@ def _apply_capture_aosp(r: Report, root: Path, aosp: str | None) -> None:
     cap = Capture.open(root)
     tsv = cap.path(TRACE_DIR) / "stubs.tsv"
     stubs = stub_index(load_stub_tsv(tsv)) if tsv.is_file() else {}
-    apply_aosp(r, aosp, cap.read_manifest().environment.get("prefix"), stubs)
+    apply_aosp(r, aosp, cap.read_manifest().environment.get("prefix"), stubs, no_fetch=no_fetch)
 
 
 def build_capture_report(path: Path, jank_min_frames: int = JANK_MIN_FRAMES) -> tuple[Report, Path]:
@@ -533,7 +543,7 @@ def _report_capture(args: argparse.Namespace) -> int:
         r, root = build_pair_report(Path(args.dirs[0]), Path(args.dirs[1]), args.density, args.jank_min_frames)
     else:
         r, root = build_capture_report(Path(args.dirs[0]), args.jank_min_frames)
-    _apply_capture_aosp(r, root, args.aosp)
+    _apply_capture_aosp(r, root, args.aosp, args.no_aosp_fetch)
     return _emit(args, r, root)
 
 
@@ -597,9 +607,9 @@ def _run_explain(args: argparse.Namespace) -> int:
     if resolve(args.aosp, "ATL_DOCTOR_AOSP") and f.kind in ("stub", "missing") and "#" in f.key:
         one = Report(r.mode, {}, [], [], [f])
         if root:
-            _apply_capture_aosp(one, root, args.aosp)
+            _apply_capture_aosp(one, root, args.aosp, args.no_aosp_fetch)
         else:
-            apply_aosp(one, args.aosp, None, {})
+            apply_aosp(one, args.aosp, None, {}, no_fetch=args.no_aosp_fetch)
     sys.stdout.write(render_explain(f, r, root))
     return 0
 
@@ -627,6 +637,7 @@ def register(sub: argparse._SubParsersAction) -> None:
                                                     "(default: $ATL_DOCTOR_ATL_SRC)")
     p.add_argument("--aosp", metavar="DIR", help="AOSP source tree (root or frameworks/base) to compare stubs and "
                                                  "missing methods with (default: $ATL_DOCTOR_AOSP)")
+    p.add_argument("--no-aosp-fetch", action="store_true", help="do not download AOSP source when --aosp is not given (default: fetch once into the cache)")
     p.add_argument("--density", type=float, metavar="D",
                    help="Android display density (dp scale) for the tree comparison (default: from the Android capture)")
     p.add_argument("--jank-min-frames", type=_positive_int, default=JANK_MIN_FRAMES, metavar="N",
@@ -638,6 +649,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     e = sub.add_parser("explain", help="show everything known about one finding", parents=[common_parser()])
     e.add_argument("-d", "--dir", metavar="DIR", help="capture directory or JSON report")
     e.add_argument("--aosp", metavar="DIR", help="AOSP source tree (root or frameworks/base; default: $ATL_DOCTOR_AOSP)")
+    e.add_argument("--no-aosp-fetch", action="store_true", help="do not download AOSP source when --aosp is not given (default: fetch once into the cache)")
     e.add_argument("--jank-min-frames", type=_positive_int, default=JANK_MIN_FRAMES, metavar="N",
                    help=f"fewest frames a phase needs for a jank finding (default {JANK_MIN_FRAMES}); fewer is noted, "
                         "not reported")

@@ -1,7 +1,6 @@
 Environment
   mode: log
   phases: plain
-  aosp: not given (use --aosp DIR)
 
 Fix first
   2469dbfd   60  System.exit(3)  [1x, first: plain]

@@ -45,9 +45,14 @@ Findings are ranked by what to fix first and carry a stable ID, so two reports c
 A hit stub whose AOSP method is just as trivial (same empty body, same returned value or the parameter
 returned unchanged, e.g. \fBView.isInEditMode\fR returning false) is not a gap in ATL: it is marked "like AOSP"
 (\fBdetails.like_aosp\fR in json), left out of "Hit stubs" and "Fix first" and listed once under "Notes".
-The comparison uses the tree given with \fB\-\-aosp\fR; without one, or for what that tree lacks, a bundled
-list of trivial methods of the AOSP base classes (platform SDK 34, only names and patterns, made with
-\fItools/gen\-aosp\-defaults.py\fR) is used.
+The comparison always reads real AOSP source: the tree given with \fB\-\-aosp\fR (or $ATL_DOCTOR_AOSP) or, without one,
+a tree that atl\-doctor fetches itself. It clones only the \fBjava/\fR directories (no tests) of
+platform/frameworks/base from android.googlesource.com (shallow, \fB\-\-filter=blob:none\fR, sparse) at the newest
+release tag of Android 14 (API 34; a missing series falls back to the next lower one) into
+\fI$XDG_CACHE_HOME/atl\-doctor/aosp/<tag>\fR (default \fI~/.cache\fR), once; later runs use the cache offline.
+$ATL_DOCTOR_AOSP_URL replaces the repository URL (a mirror). Without network and without a cache, or with
+\fB\-\-no\-aosp\-fetch\fR, the report says "AOSP comparison not possible" in its environment section and the stub hits
+stay unfiltered; nothing is dropped silently.
 .PP
 Results go to standard output, messages to standard error.
 The tool never asks questions and never opens a browser.
@@ -158,6 +163,9 @@ ATL source tree; matches logged stub messages against its stub list (default: $A
 .BI \-\-aosp " DIR"
 AOSP source tree (root or frameworks/base) to compare stubs and missing methods with (default: $ATL_DOCTOR_AOSP).
 .TP
+.B \-\-no\-aosp\-fetch
+Do not download AOSP source when \fB\-\-aosp\fR is not given (default: fetch once into the cache, see DESCRIPTION).
+.TP
 .BI \-\-density " D"
 Android display density for the tree comparison (default: from the Android capture).
 .TP
@@ -188,6 +196,9 @@ Capture directory or JSON report (required).
 .BI \-\-aosp " DIR"
 AOSP source tree (default: $ATL_DOCTOR_AOSP).
 .TP
+.B \-\-no\-aosp\-fetch
+Do not download AOSP source when \fB\-\-aosp\fR is not given (default: fetch once into the cache, see DESCRIPTION).
+.TP
 .BI \-\-jank\-min\-frames " N"
 Fewest frames a phase needs for a jank finding (default: 30). A phase that is slow but has fewer frames gets no
 finding; the report notes it as \(lqtoo few frames\(rq instead.
@@ -205,6 +216,9 @@ ATL source tree (default: $ATL_DOCTOR_ATL_SRC).
 .TP
 .BI \-\-aosp " DIR"
 AOSP source tree (default: $ATL_DOCTOR_AOSP).
+.TP
+.B \-\-no\-aosp\-fetch
+Do not download AOSP source when \fB\-\-aosp\fR is not given (default: fetch once into the cache, see DESCRIPTION).
 .TP
 .B \-\-android
 Also check adb and the Android device.
@@ -232,6 +246,9 @@ Second ATL source tree (with build*/api\-impl.jar) to compare.
 .TP
 .BI \-\-aosp " DIR"
 AOSP source tree (root or frameworks/base) to compare stubs and missing methods with (default: $ATL_DOCTOR_AOSP).
+.TP
+.B \-\-no\-aosp\-fetch
+Do not download AOSP source when \fB\-\-aosp\fR is not given (default: fetch once into the cache, see DESCRIPTION).
 .TP
 .BI \-\-sdk\-int " N"
 SDK_INT that ATL reports (default: the app's minSdk, at least 9).
@@ -271,6 +288,9 @@ ATL source tree; replaced by \fB\-\-atl\-src\fR.
 .TP
 .B ATL_DOCTOR_AOSP
 AOSP source tree; replaced by \fB\-\-aosp\fR.
+.TP
+.B ATL_DOCTOR_AOSP_URL
+Git URL (or path) of platform/frameworks/base to fetch AOSP source from (default: android.googlesource.com).
 .TP
 .B ATL_DOCTOR_AGENT
 JVMTI agent library; replaced by \fB\-\-agent\fR.

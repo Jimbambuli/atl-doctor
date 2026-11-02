@@ -15,6 +15,13 @@ def _assert_golden(text: str, name: str) -> None:
     assert text == path.read_text(encoding="utf-8")
 
 
+@pytest.fixture(autouse=True)
+def _no_network_for_aosp(tmp_path_factory, monkeypatch):
+    """The AOSP source is fetched on demand: tests never reach android.googlesource.com and never touch ~/.cache."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path_factory.mktemp("xdg-cache")))
+    monkeypatch.setenv("ATL_DOCTOR_AOSP_URL", "/nonexistent/aosp-mirror")
+
+
 @pytest.fixture
 def assert_golden():
     return _assert_golden

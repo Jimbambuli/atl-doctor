@@ -216,7 +216,7 @@ def _run_scan(args: argparse.Namespace) -> int:
     from ..report import apply_aosp, needs_aosp, render_html, render_json, render_text
 
     if needs_aosp(rep) or resolve(args.aosp, "ATL_DOCTOR_AOSP"):
-        apply_aosp(rep, args.aosp, str(prefix), stub_index(states[0].stubs), states[0].world)
+        apply_aosp(rep, args.aosp, str(prefix), stub_index(states[0].stubs), states[0].world, no_fetch=args.no_aosp_fetch)
 
     text = {"text": render_text, "json": render_json, "html": render_html}[args.format](rep)
     if args.output:
@@ -240,6 +240,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--compare-src", metavar="DIR", help="second ATL source tree (with build*/api-impl.jar) to compare")
     p.add_argument("--aosp", metavar="DIR", help="AOSP source tree (root or frameworks/base) to compare stubs and "
                                                  "missing methods with (default: $ATL_DOCTOR_AOSP)")
+    p.add_argument("--no-aosp-fetch", action="store_true", help="do not download AOSP source when --aosp is not given (default: fetch once into the cache)")
     p.add_argument("--sdk-int", type=int, metavar="N", help="SDK_INT ATL reports (default: the app's minSdk, at least 9)")
     p.add_argument("apks", nargs="+", metavar="APK")
     p.set_defaults(func=_run_scan)

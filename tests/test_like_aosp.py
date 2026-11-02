@@ -1,17 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Stub hits that are just as trivial in AOSP are not ATL gaps: marked "like AOSP", left out of the stub counts."""
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from atl_doctor.findings import Finding, Klass, Occurrence
-from atl_doctor.sources.aosp import attach_aosp, attach_bundled, load_defaults, open_aosp
+from atl_doctor.sources.aosp import attach_aosp, open_aosp
 from atl_doctor.sources.stubs import build_stub_list, load_stub_tsv, save_stub_tsv, stub_index, trivial_pattern
 
 DATA = Path(__file__).parent / "data"
 V = "android.view.View"
-ROOT = Path(__file__).parent.parent
 
 
 def _entries():
@@ -79,27 +76,6 @@ def test_unknown_value_is_conservative():
     fs = _findings("getScaleMode", "isInEditMode")
     attach_aosp(fs, open_aosp(DATA / "like-aosp"), None, stub_index(es))
     assert [f.details.get("like_aosp", False) for f in fs] == [False, True]   # zero values depend on the type only
-
-
-def test_defaults_generator_and_bundled_list(tmp_path):
-    out = tmp_path / "d.tsv"
-    subprocess.run([sys.executable, str(ROOT / "tools/gen-aosp-defaults.py"), "--aosp", str(DATA / "like-aosp"),
-                    "--atl-src", str(DATA / "like-atl-src"), "-o", str(out)], check=True)
-    d = load_defaults(out)
-    assert d[(V, "isInEditMode", 0)] == ("empty0", "false")
-    assert d[(V, "layout", 1)] == ("empty", "") and (V, "layout", 2) not in d and (V, "isShown", 0) not in d
-    sig = {"isInEditMode": "()Z", "isShown": "()Z", "layout": "(II)V"}
-    es = [e.__class__(e.kind, e.cls, e.method, sig.get(e.method, e.sig), e.location, e.bytecode_kind, e.comment, e.ret)
-          for e in _entries() if e.method in sig]
-    fs = _findings("isInEditMode", "isShown", "layout")
-    attach_bundled(fs, stub_index(es), d)
-    assert [f.details.get("like_aosp", False) for f in fs] == [True, False, False]
-    assert fs[0].details["like_aosp_source"] == "bundled"
-
-
-def test_shipped_defaults_exist():
-    d = load_defaults()
-    assert len(d) > 5 and all(len(k) == 3 for k in d)
 
 
 def _report():

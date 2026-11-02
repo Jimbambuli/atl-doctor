@@ -141,7 +141,7 @@ def test_report_names_aosp_version(tmp_path, capsys):
     (f,) = [f for f in d["findings"] if f["id"] == f"stub:{DR}#parseBlendMode"]
     assert f["details"]["aosp"]["verdict"] == "portable" and f["details"]["aosp_sdk"] == 36
     assert main(["report", "-f", "json", str(cap)]) == 0
-    assert json.loads(capsys.readouterr().out)["environment"]["aosp"] == "not given (use --aosp DIR)"
+    assert json.loads(capsys.readouterr().out)["environment"]["aosp"].startswith("AOSP comparison not possible")
 
 
 def test_report_text_and_env_variable(tmp_path, capsys, monkeypatch):

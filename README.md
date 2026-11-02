@@ -24,10 +24,13 @@ what is missing. Two optional pieces live outside this repository's build: the J
 (`tools/build-jvmti-plugin.sh`) and the view-tree hook (`docs/atlviewdump.md`).
 
 Configuration: options win over the environment variables `ATL_DOCTOR_PREFIX`, `ATL_DOCTOR_ATL_SRC`,
-`ATL_DOCTOR_AOSP`, `ATL_DOCTOR_AGENT`; there is no configuration file.
+`ATL_DOCTOR_AOSP`, `ATL_DOCTOR_AOSP_URL`, `ATL_DOCTOR_AGENT`; there is no configuration file.
 
 Stub hits that are just as trivial in AOSP (`View.isInEditMode` returns false there too) are marked "like AOSP" and
-not counted as stubs; see the manual page. `tools/gen-aosp-defaults.py` rebuilds the bundled list of such methods.
+not counted as stubs. The comparison always reads real AOSP source: `--aosp DIR`, else atl-doctor fetches the
+`java/` directories of `platform/frameworks/base` itself (sparse shallow clone, API 34 tag) into
+`~/.cache/atl-doctor/aosp/<tag>` once and reuses it offline. `--no-aosp-fetch` turns that off; without network and
+cache the report says the comparison was not possible. See the manual page.
 
 ## Examples
 

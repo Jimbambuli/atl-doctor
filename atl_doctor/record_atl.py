@@ -28,7 +28,10 @@ from .sources.trace import write_watch_file
 ARM_FILE = "armed"
 HANG_MS = 100     # main thread blocked longer than this is a hang (Spec 6.4)
 RUN_DIR = "run"  # private KWin session: socket, D-Bus address, logs, input helper FIFO
-ARM_AFTER_S = 5.0
+# The lifecycle breakpoints are set from the start: an ART that reports dex pc events only for the methods that
+# need them (Instrumentation::NeedsDexPcEvents(), art_standalone jw-fehler) runs the rest at almost normal speed.
+# With an older ART the breakpoint listener slows every interpreted method down (JW Library: window 0.68 -> 1.37 s).
+ARM_AFTER_S = 0.0
 TREE_WAIT_S = 30.0  # tree request (10 s) + screenshot of a mark sent by the last step
 STOP_GRACE_S = 10.0
 TRACE_FILE = "trace.bin"

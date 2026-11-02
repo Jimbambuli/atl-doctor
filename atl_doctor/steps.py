@@ -15,6 +15,7 @@ import os
 import re
 import shlex
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 WAIT_IDLE_S = 10.0
 WAIT_WINDOW_S = 60.0
 TEXT_CHUNK = 400  # bytes of text per line to the input helper (it reads lines of up to 511 bytes)
+UIAUTOMATOR_LOCK = threading.Lock()  # two uiautomator dumps at once kill one of them (marks and steps both dump)
 
 
 @dataclass(frozen=True)
@@ -671,8 +673,9 @@ class AndroidDriver:
 
         self._n_tree += 1
         out = self.cap.path(TREES) / f"step-{self._n_tree:03d}.xml"
-        self._adb("shell", "uiautomator", "dump", "/sdcard/atl-doctor.xml")
-        self._adb("pull", "/sdcard/atl-doctor.xml", str(out))
+        with UIAUTOMATOR_LOCK:
+            self._adb("shell", "uiautomator", "dump", "/sdcard/atl-doctor.xml")
+            self._adb("pull", "/sdcard/atl-doctor.xml", str(out))
         import xml.etree.ElementTree as ET
         root = ET.parse(out).getroot()
         content = next((e for e in root.iter("node") if e.get("resource-id") == "android:id/content"), None)
@@ -690,8 +693,9 @@ class AndroidDriver:
 
         self._n_tree += 1
         out = self.cap.path(TREES) / f"scroll-{self._n_tree:03d}.xml"
-        self._adb("shell", "uiautomator", "dump", "/sdcard/atl-doctor.xml")
-        self._adb("pull", "/sdcard/atl-doctor.xml", str(out))
+        with UIAUTOMATOR_LOCK:
+            self._adb("shell", "uiautomator", "dump", "/sdcard/atl-doctor.xml")
+            self._adb("pull", "/sdcard/atl-doctor.xml", str(out))
         return load_tree(out, "android", self.density)
 
     def frame_count(self) -> int | None:

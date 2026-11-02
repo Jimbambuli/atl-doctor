@@ -2,8 +2,9 @@
 """Screenshots of ATL and Android compared step by step (screenshots with the same name in shots/).
 
 Taken over from the experiment tool bildvergleich.py, without PIL: both pictures are cut to the app content in dp
-(ATL: window surface origin plus content origin from the view tree; Android: content origin from the view tree, else
-below a 24 dp status bar, and without a 48 dp navigation bar), reduced to grey cells of CELL_DP and compared over
+(ATL: window surface origin plus content origin from the view tree of that name, else from any other tree;
+Android: content origin from a view tree likewise, else below a 24 dp status bar; without the 48 dp navigation
+bar at the bottom), reduced to grey cells of CELL_DP and compared over
 the common area. Similarity is 1 - mean grey difference / 255, `different` the share of cells that differ by more
 than STRONG; "ATL empty" means the ATL content is almost one colour while Android's is not.
 """
@@ -22,14 +23,25 @@ STATUS_BAR_DP = 24
 NAV_BAR_DP = 48
 
 
-def _origin(cap: Path, name: str, side: str) -> tuple[float, float] | None:
-    from .tree import content_origin
+def _content_origin(xml: Path, side: str) -> tuple[float, float]:
+    """Android: the tree's content origin. ATL: where GTK put android:id/content in the window surface (`bounds`,
+    with shadow and title bar), not the app's own rectangle (`atl-jbounds`)."""
+    from .tree import content_origin, load_tree
 
-    xml = cap / TREES / f"{name}.xml"
-    try:
-        return content_origin(xml, side) if xml.is_file() else None
-    except DoctorError:
-        return None
+    if side != "atl":
+        return content_origin(xml, side)
+    c = next((n for n in load_tree(xml, "atl", normalize=False) if n.full_id == "android:id/content"), None)
+    return (c.gtk_rect[0], c.gtk_rect[1]) if c else (0.0, 0.0)
+
+
+def _origin(cap: Path, name: str, side: str) -> tuple[float, float] | None:
+    own = cap / TREES / f"{name}.xml"   # else another tree: the window's content origin does not move
+    for xml in [own] * own.is_file() + sorted((cap / TREES).glob("*.xml")):
+        try:
+            return _content_origin(xml, side)
+        except DoctorError:
+            continue
+    return None
 
 
 def _cells(img: tuple[int, int, bytes], ox: float, oy: float, scale: float, cols: int, rows: int) -> list[float]:
@@ -78,10 +90,9 @@ def compare_shots(atl_dir: Path, android_dir: Path, density: float, out_dir: Pat
         sx, sy = read_origin(a_png)
         gx, gy = _origin(atl_dir, n, "atl") or (0.0, 0.0)
         ax, ay = sx + gx, sy + gy
-        tree = _origin(android_dir, n, "android")
-        bx, by = tree or (0.0, STATUS_BAR_DP * density)
+        bx, by = _origin(android_dir, n, "android") or (0.0, STATUS_BAR_DP * density)
         w_dp = min(a[0] - ax, (b[0] - bx) / density)
-        h_dp = min(a[1] - ay, (b[1] - by) / density - (0 if tree else NAV_BAR_DP))
+        h_dp = min(a[1] - ay, (b[1] - by) / density - NAV_BAR_DP)
         cols, nrows = int(w_dp // CELL_DP), int(h_dp // CELL_DP)
         if cols < 1 or nrows < 1:
             continue

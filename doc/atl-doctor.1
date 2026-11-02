@@ -265,9 +265,10 @@ SDK_INT that ATL reports (default: the app's minSdk, at least 9).
 .B vergleich
 Record the same scenario under ATL and on Android (\fBrecord\fR and \fBrecord \-\-android\fR into
 \fIDIR\fR/atl and \fIDIR\fR/android) and write a short comparison to \fIDIR\fR/bericht.md (at most 60 lines, also on
-standard output) and \fIDIR\fR/bericht.json: likely causes first (crash, exception only on ATL, native library or
-symbol missing, missing method, lifecycle difference, stub whose result is used, EGL/audio error, other stubs,
-screenshots that differ), then stubs hit by count with their caller, exceptions only on ATL, lifecycle
+standard output) and \fIDIR\fR/bericht.json: likely causes first (crash, exception only on ATL through app code,
+lifecycle difference, native library or symbol missing, missing method, exception only on ATL inside the platform,
+stub whose result is used, EGL/audio error, other stubs, screenshots that differ; a candidate first seen while
+the app starts, before the first mark, ranks lower), then stubs hit by count with their caller, exceptions only on ATL, lifecycle
 differences, missing native pieces and the screenshots of each step compared (worst first; diff pictures in
 \fIDIR\fR/shots). It only shows; nothing is changed.
 .RS
@@ -313,7 +314,8 @@ the directory is \fIapk name\fR_), kept in $XDG_DATA_HOME/atl\-doctor/zustand.
 .TP
 .B \-\-android
 On the Android emulator: an AVD snapshot named atl\-doctor\-\fIPACKAGE\fR\-\fINAME\fR (adb emu avd snapshot), so
-this needs an emulator.
+this needs an emulator. Where the emulator skips the snapshot (for example after an app used Vulkan), the
+app's /data/data directory is copied as root instead (adb root) and loaded from that copy.
 .TP
 .BI \-\-launcher " CMD"
 The ATL launcher; a Flatpak keeps the app data below ~/.var/app.

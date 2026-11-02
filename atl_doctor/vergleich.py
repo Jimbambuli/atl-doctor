@@ -23,8 +23,9 @@ DEFAULT_SCENARIO = 'wait 15\nscreenshot "start"\n'
 SHOT_BAD = 0.8  # a step whose screenshots are less similar than this is a cause candidate
 
 # score of a cause candidate by kind; within a score the larger count comes first
-SCORE = {"crash": 100, "exception": 90, "native": 85, "missing": 80, "lifecycle": 70, "stub-result": 60,
-         "native-other": 55, "stub": 40, "shot": 30}
+SCORE = {"crash": 100, "exception": 90, "lifecycle": 88, "native": 85, "missing": 80, "exception-platform": 75,
+         "stub-result": 60, "native-other": 55, "stub": 40, "shot": 30}
+START_PENALTY = 10  # a candidate first seen while the app starts (phase 0, before the first mark) is often noise
 CAPS = {"causes": 5, "stubs": 10, "exceptions": 6, "lifecycle": 4, "native": 5, "shots": 6}
 
 
@@ -37,10 +38,15 @@ def _first_phase(f) -> str:
     return min(atl, key=lambda o: o.phase_index).phase if atl else ""
 
 
+def _starts_early(f) -> bool:
+    """True if the finding is first seen in phase 0 (the app starting, before the first mark)."""
+    return min((o.phase_index for o in f.occurrences if o.side == "atl"), default=1) == 0
+
+
 def build_comparison(atl_dir: Path, android_dir: Path, out_dir: Path, density: float | None = None,
                      no_aosp_fetch: bool = False) -> dict:
     """All sections of the comparison as plain data (also the JSON report)."""
-    from .capture import ATL_LOG, Capture
+    from .capture import ATL_LOG, STEPS_LOG, Capture
     from .report import apply_capture_aosp, build_pair_report, like_aosp
     from .sources.native import native_findings
     from .sources.shotdiff import compare_shots
@@ -55,16 +61,18 @@ def build_comparison(atl_dir: Path, android_dir: Path, out_dir: Path, density: f
     stubs = sorted((f for f in fs if f.kind in ("stub", "stublog") and not like_aosp(f) and _atl_count(f)),
                    key=lambda f: (-_atl_count(f), f.key))
     stub_rows = [{"title": f.key.replace("#", "."), "count": _atl_count(f), "kinds": f.details.get("kinds", []),
+                  "phase": _first_phase(f), "early": _starts_early(f),
                   "caller": (f.details.get("callers") or [""])[0], "result_used": f.klass == Klass.STUB_RESULT_USED,
                   "id": f.short_id} for f in stubs]
-    exc_rows = [{"title": f.title, "count": _atl_count(f), "phase": _first_phase(f),
+    exc_rows = [{"title": f.title, "count": _atl_count(f), "phase": _first_phase(f), "early": _starts_early(f),
                  "where": f.details.get("app_frame") or next((o.where for o in f.occurrences if o.where), ""),
-                 "id": f.short_id}
+                 "app": bool(f.details.get("app_frame")), "id": f.short_id}
                 for f in sorted((f for f in fs if f.kind == "exc" and f.klass == Klass.EXC_ATL_ONLY),
                                 key=lambda f: (-_atl_count(f), f.key))]
     crash_rows = [{"title": f.title, "count": _atl_count(f), "id": f.short_id}
                   for f in fs if f.kind == "crash" and not f.on_android and f.klass == Klass.CRASH and _atl_count(f)]
-    lc_rows = [{"title": f.title, "id": f.short_id} for f in fs if f.kind == "lc"]
+    lc_rows = [{"title": f.title, "phase": _first_phase(f), "early": _starts_early(f), "id": f.short_id}
+               for f in fs if f.kind == "lc"]
     missing_rows = [{"title": f.title, "count": _atl_count(f), "id": f.short_id}
                     for f in fs if f.kind == "missing" and not f.on_android and _atl_count(f)]
 
@@ -82,33 +90,46 @@ def build_comparison(atl_dir: Path, android_dir: Path, out_dir: Path, density: f
     shots = compare_shots(Path(atl_dir), Path(android_dir), density, Path(out_dir) / "shots")
 
     causes = [{"kind": "crash", "title": c["title"], "count": c["count"], "where": ""} for c in crash_rows]
-    causes += [{"kind": "exception", "title": e["title"], "count": e["count"], "where": e["where"]} for e in exc_rows]
+    causes += [{"kind": "exception" if e["app"] else "exception-platform", "title": e["title"], "count": e["count"],
+                "where": e["where"], "phase": e["phase"], "early": e["early"]} for e in exc_rows]
     causes += [{"kind": "native" if n["key"].split(":")[0] in ("dlopen", "symbol") else "native-other",
                 "title": n["title"], "count": n["count"], "where": ""} for n in native_rows]
     causes += [{"kind": "missing", "title": m["title"], "count": m["count"], "where": ""} for m in missing_rows]
-    causes += [{"kind": "lifecycle", "title": x["title"], "count": 1, "where": ""} for x in lc_rows]
+    causes += [{"kind": "lifecycle", "title": x["title"], "count": 1, "where": "", "early": x["early"]}
+               for x in lc_rows]
     causes += [{"kind": "stub-result" if s["result_used"] else "stub", "title": s["title"], "count": s["count"],
-                "where": s["caller"]} for s in stub_rows]
+                "where": s["caller"], "phase": s["phase"], "early": s["early"]} for s in stub_rows]
     causes += [{"kind": "shot", "title": f"step {s['step']}: similarity {s['similarity']}"
                 + (f", {s['finding']}" if s["finding"] else ""), "count": 1, "where": ""}
                for s in shots if s["similarity"] < SHOT_BAD or s["finding"]]
     for c in causes:
-        c["score"] = SCORE[c["kind"]]
+        c.setdefault("phase", "")
+        c["score"] = SCORE[c["kind"]] - (START_PENALTY if c.pop("early", False) else 0)
         c["kind"] = c["kind"].split("-")[0]
     causes.sort(key=lambda c: (-c["score"], -c["count"], c["title"]))
 
+    unfinished = [side for side, d in (("ATL", atl_dir), ("Android", android_dir))
+                  if (Path(d) / STEPS_LOG).is_file()
+                  and Capture.open(d).read_manifest().environment.get("stopped_by") != "steps"]
     m = Capture.open(atl_dir).read_manifest()
-    return {"app": m.package or "", "atl": str(atl_dir), "android": str(android_dir),
+    return {"unfinished": unfinished, "app": m.package or "", "atl": str(atl_dir), "android": str(android_dir),
             "mode": m.environment.get("trace", ""), "start_state": m.environment.get("start_state", ""),
             "causes": causes, "crashes": crash_rows, "stubs": stub_rows, "exceptions": exc_rows,
             "lifecycle": lc_rows, "native": native_rows, "missing": missing_rows, "shots": shots,
             "environment": r.environment}
 
 
+def _t(title: str, n: int = 120) -> str:
+    return title if len(title) <= n else title[:n - 3] + "..."
+
+
 def render_markdown(d: dict) -> str:
     out = [f"# atl-doctor vergleich: {d.get('app') or '?'}",
            f"ATL `{d.get('atl')}` ({d.get('mode') or 'full trace'}) / Android `{d.get('android')}`"
            + (f", start state `{d['start_state']}`" if d.get("start_state") else "")]
+    out += [f"Scenario stopped on {side}: {msg}" for side, msg in (d.get("errors") or {}).items()]
+    out += [f"Scenario not finished on {side}: the app ended (or the recording was stopped)"
+            for side in d.get("unfinished") or [] if side not in (d.get("errors") or {})]
 
     def section(title: str, key: str, line) -> None:
         rows = d.get(key) or []
@@ -119,20 +140,21 @@ def render_markdown(d: dict) -> str:
         elif len(rows) > CAPS[key]:
             out.append(f"... {len(rows) - CAPS[key]} more in bericht.json")
 
-    section("Likely causes", "causes", lambda i, c: f"{i}. [{c['kind']}] {c['title']}"
-            + (f" ({c['count']}x)" if c["count"] > 1 else "") + (f" <- {c['where']}" if c["where"] else ""))
-    section("Stubs hit", "stubs", lambda i, s: f"- {s['count']}x {s['title']}"
+    section("Likely causes", "causes", lambda i, c: f"{i}. [{c['kind']}] {_t(c['title'])}"
+            + (f" ({c['count']}x)" if c["count"] > 1 else "") + (f" <- {c['where']}" if c["where"] else "")
+            + (f" [{c['phase']}]" if c["phase"] else ""))
+    section("Stubs hit", "stubs", lambda i, s: f"- {s['count']}x {_t(s['title'])}"
             + (" (result used)" if s["result_used"] else "") + (f" <- {s['caller']}" if s["caller"] else ""))
-    section("Exceptions only on ATL", "exceptions", lambda i, e: f"- {e['count']}x {e['title']}"
+    section("Exceptions only on ATL", "exceptions", lambda i, e: f"- {e['count']}x {_t(e['title'])}"
             + (f" <- {e['where']}" if e["where"] else "") + (f" [{e['phase']}]" if e["phase"] else ""))
-    section("Lifecycle differences", "lifecycle", lambda i, x: f"- {x['title']}")
-    section("Missing native pieces", "native", lambda i, n: f"- {n['count']}x {n['title']}")
+    section("Lifecycle differences", "lifecycle", lambda i, x: f"- {_t(x['title'])}")
+    section("Missing native pieces", "native", lambda i, n: f"- {n['count']}x {_t(n['title'])}")
     section("Screenshots (worst first)", "shots", lambda i, s: f"- {s['step']}: similarity {s['similarity']}, "
             f"{round(s['different'] * 100)} % different" + (f", {s['finding']}" if s["finding"] else ""))
     return "\n".join(out[:MAX_LINES]) + "\n"
 
 
-def _record(args: argparse.Namespace, out: Path) -> tuple[Path, Path]:
+def _record(args: argparse.Namespace, out: Path, errors: dict[str, str]) -> tuple[Path, Path]:
     from .env import resolve
     from .cli import log
 
@@ -157,6 +179,7 @@ def _record(args: argparse.Namespace, out: Path) -> tuple[Path, Path]:
             run()
         except DoctorError as e:  # a step that failed still leaves a capture worth comparing
             log(0, f"{side} recording: {e}")
+            errors[side] = str(e)
     return atl, android
 
 
@@ -164,11 +187,13 @@ def _run(args: argparse.Namespace) -> int:
     out = Path(args.output or f"atl-doctor-vergleich-{datetime.now():%Y%m%d-%H%M%S}")
     if bool(args.atl_dir) != bool(args.android_dir):
         raise UsageError("--atl-dir and --android-dir go together")
+    errors: dict[str, str] = {}
     if args.atl_dir:
         atl, android = Path(args.atl_dir), Path(args.android_dir)
     else:
-        atl, android = _record(args, out)
+        atl, android = _record(args, out, errors)
     d = build_comparison(atl, android, out, args.density, args.no_aosp_fetch)
+    d["errors"] = errors
     out.mkdir(parents=True, exist_ok=True)
     (out / "bericht.json").write_text(json.dumps(d, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     md = render_markdown(d)

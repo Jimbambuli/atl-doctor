@@ -69,3 +69,20 @@ def test_android_snapshot_failure_is_an_error(adb, apk, capsys):  # noqa: F811
     (adb / "table.json").write_text(json.dumps(t))
     assert main(["zustand", "laden", "--android", str(apk), "x"]) == 1
     assert "snapshot not found" in capsys.readouterr().err
+
+
+def test_android_falls_back_to_the_app_data_when_the_emulator_refuses_a_snapshot(adb, apk, home, capsys):  # noqa: F811
+    table(adb)
+    t = json.loads((adb / "table.json").read_text())
+    t["emu avd snapshot save"] = ["KO: Snapshot save is skipped. Reason: UNSUPPORTED_VK_APP\n", 0]
+    t["exec-out tar"] = ["TARDATA", 0]
+    (adb / "table.json").write_text(json.dumps(t))
+    assert main(["zustand", "sichern", "--android", str(apk), "angemeldet"]) == 0
+    saved = home / f".local/share/atl-doctor/zustand/android/{PKG}/angemeldet.tar"
+    assert saved.read_bytes() == b"TARDATA"
+    assert main(["zustand", "laden", "--android", str(apk), "angemeldet"]) == 0
+    c = calls(adb)
+    assert f"exec-out tar -C /data/data -cf - {PKG}" in c
+    assert not any(x.startswith("emu avd snapshot load") for x in c)
+    assert any(x.startswith("push ") and x.endswith("/data/local/tmp/atl-doctor-state.tar") for x in c)
+    assert any(x.startswith("shell") and "tar -C /data/data -xf /data/local/tmp/atl-doctor-state.tar" in x for x in c)

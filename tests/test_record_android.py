@@ -284,3 +284,22 @@ def test_android_start_state_loads_avd_snapshot_before_install(adb, apk, tmp_pat
     load = c.index(f"emu avd snapshot load atl-doctor-{PKG}-eingerichtet")
     assert load < next(i for i, x in enumerate(c) if x.startswith("install -r "))
     assert Capture.open(out).read_manifest().environment["start_state"] == "eingerichtet"
+
+
+def test_uiautomator_dumps_never_overlap(adb, tmp_path):
+    """Two uiautomator dumps at once kill one of them (seen on the emulator): the mark's tree and a step's
+    target lookup share one lock."""
+    from atl_doctor.steps import UIAUTOMATOR_LOCK, AndroidDriver
+
+    table(adb)
+    shutil.copy(TREES / "android-main.xml", adb / "device" / "atl-doctor.xml")
+    cap = Capture.create(tmp_path / "c", "android")
+    (tmp_path / "c/trees").mkdir()
+    d = AndroidDriver("emulator-5554", cap, PKG, 1.0)
+    with UIAUTOMATOR_LOCK:
+        t = threading.Thread(target=d.locate, args=("id/nothing",))
+        t.start()
+        time.sleep(0.5)
+        assert not any("uiautomator" in x for x in calls(adb)) if (adb / "calls.log").exists() else True
+    t.join(10)
+    assert any("uiautomator" in x for x in calls(adb))

@@ -119,8 +119,12 @@ def _install_agent(adb: Adb, package: str, lib: Path, wrap: Path) -> bool:
 
 def _tree(adb: Adb, cap: Capture, mark: Mark) -> None:
     out = cap.path(TREES) / f"{tree_name(mark)}.xml"
-    adb.shell("uiautomator", "dump", DEVICE_TREE, timeout=30)
-    if adb.run("pull", DEVICE_TREE, str(out)).returncode != 0 or not out.is_file():
+    from .steps import UIAUTOMATOR_LOCK
+
+    with UIAUTOMATOR_LOCK:
+        adb.shell("uiautomator", "dump", DEVICE_TREE, timeout=30)
+        pulled = adb.run("pull", DEVICE_TREE, str(out)).returncode == 0
+    if not pulled or not out.is_file():
         _warn(f"no view tree for mark {mark.index} ({mark.name}): uiautomator dump failed")
 
 

@@ -4,7 +4,9 @@
 Under ATL the app's data directory is copied (ATL keeps it in $ANDROID_APP_DATA_DIR, else
 $XDG_DATA_HOME/android_translation_layer, inside a Flatpak below ~/.var/app/ID/data, as `<apk name>_`); the copies
 live in $XDG_DATA_HOME/atl-doctor/zustand/<apk name>/NAME. On Android the emulator saves and loads a whole AVD
-snapshot named atl-doctor-PACKAGE-NAME (adb emu), so this needs an emulator, not a phone.
+snapshot named atl-doctor-PACKAGE-NAME (adb emu), so this needs an emulator, not a phone. Where the emulator skips
+the snapshot (an app used Vulkan), the app's /data/data directory is copied as root instead
+($XDG_DATA_HOME/atl-doctor/zustand/android/PACKAGE/NAME.tar) and loaded from there.
 """
 from __future__ import annotations
 
@@ -80,12 +82,43 @@ def _android_snapshot(action: str, package: str, name: str) -> str:
         raise PrerequisiteMissing("zustand --android needs an emulator: no device attached (check `adb devices`)")
     adb = Adb(serial)
     snap = f"atl-doctor-{package}-{name}"
+    tar = _data_home() / "atl-doctor/zustand/android" / package / f"{name}.tar"
+    if action == "load" and tar.is_file():
+        return _android_data("load", adb, package, tar)
     out = adb.out("emu", "avd", "snapshot", action, snap, timeout=300).strip()
+    if action == "save" and not out.startswith("OK") and "skipped" in out:
+        return _android_data("save", adb, package, tar)  # e.g. "Reason: UNSUPPORTED_VK_APP" (an app used Vulkan)
     if not out.startswith("OK"):
         raise DoctorError(f"emulator snapshot {action} {snap} failed: {out or 'no answer (not an emulator?)'}")
+    tar.unlink(missing_ok=True)  # the snapshot is newer than an app-data copy of the same name
     if action == "load":
         adb.run("wait-for-device", timeout=120)
     return snap
+
+
+DEVICE_TAR = "/data/local/tmp/atl-doctor-state.tar"
+
+
+def _android_data(action: str, adb, package: str, tar: Path) -> str:
+    """Fallback when the emulator will not take a snapshot: the app's /data/data directory as root (adb root)."""
+    adb.out("root")
+    adb.run("wait-for-device", timeout=60)
+    adb.shell("am", "force-stop", package)
+    if action == "save":
+        r = adb.run("exec-out", "tar", "-C", "/data/data", "-cf", "-", package, timeout=300)
+        if r.returncode != 0 or not r.stdout:
+            raise DoctorError(f"cannot copy /data/data/{package} (needs adb root)")
+        tar.parent.mkdir(parents=True, exist_ok=True)
+        tar.write_bytes(r.stdout)
+        return str(tar)
+    if adb.run("push", str(tar), DEVICE_TAR, timeout=300).returncode != 0:
+        raise DoctorError(f"adb push {tar} failed")
+    d = f"/data/data/{package}"
+    script = (f'o=$(stat -c %u:%g {d}) && rm -rf {d}/* && tar -C /data/data -xf {DEVICE_TAR} && chown -R $o {d} '
+              f'&& restorecon -R {d}; rc=$?; rm -f {DEVICE_TAR}; exit $rc')
+    if adb.run("shell", script, timeout=300).returncode != 0:
+        raise DoctorError(f"cannot restore {d} (needs adb root)")
+    return str(tar)
 
 
 def load_start_state(name: str, apk: Path, android: bool, launcher: str | None = None) -> str:

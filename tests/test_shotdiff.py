@@ -39,3 +39,35 @@ def test_empty_atl_picture_is_flagged_and_sorted_first(tmp_path):
 
 def test_no_shots_no_rows(tmp_path):
     assert compare_shots(tmp_path / "a", tmp_path / "b", 1.0, tmp_path / "out") == []
+
+
+def test_a_shot_without_its_own_tree_uses_another_tree_of_the_capture(tmp_path):
+    """screenshot "x" has no tree of its own; the content origin of the window is the same as at the marks."""
+    import shutil
+    from pathlib import Path
+
+    trees = Path(__file__).parent / "data/trees"
+    a, b = tmp_path / "a", tmp_path / "b"
+    (a / "trees").mkdir(parents=True)
+    shutil.copy(trees / "atl-main.xml", a / "trees/01-Start.xml")       # content at 10,20 in the ATL picture
+    _png(a / "shots/x.png", 220, 220, lambda x, y: (255, 0, 0, 255) if y < 20 else _stripes(x - 10, y))
+    _png(b / "shots/x.png", 200, 248, lambda x, y: _stripes(x, y))
+    rows = compare_shots(a, b, 1.0, tmp_path / "out")
+    assert rows[0]["similarity"] > 0.97
+
+
+def test_atl_content_origin_is_where_gtk_put_it_not_the_java_rectangle(tmp_path):
+    """bounds= is the GTK surface position (shadow and title bar included), atl-jbounds= the app's own dp."""
+    from pathlib import Path
+
+    src = (Path(__file__).parent / "data/trees/atl-main.xml").read_text()
+    src = src.replace('bounds="[10,20][550,820]" atl-class="android.widget.FrameLayout"',
+                      'bounds="[23,51][573,851]" atl-class="android.widget.FrameLayout"')
+    src = src.replace('atl-jbounds="[10,20][550,820]"', 'atl-jbounds="[0,0][550,800]"')
+    a, b = tmp_path / "a", tmp_path / "b"
+    (a / "trees").mkdir(parents=True)
+    (a / "trees/01-Start.xml").write_text(src)
+    _png(a / "shots/x.png", 260, 260, lambda x, y: (255, 0, 0, 255) if y < 28 else _stripes(x, y))
+    (a / "shots/x.origin").write_text("-23 -23\n")                     # the surface starts 23 px off screen
+    _png(b / "shots/x.png", 200, 248, lambda x, y: _stripes(x, y))
+    assert compare_shots(a, b, 1.0, tmp_path / "out")[0]["similarity"] > 0.97

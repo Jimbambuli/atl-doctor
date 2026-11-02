@@ -44,7 +44,7 @@ STUBS = ("N\t1\tandroid.view.inputmethod.InputMethodManager\tshowSoftInput\t(Lan
 @pytest.fixture
 def pair(tmp_path):
     atl = _capture(tmp_path / "atl", "atl", [
-        _exc(1_500_000, "java.lang.NullPointerException", "x is null", f"android.view.View.performClick|{APP}.Main.onClick"),
+        _exc(2_500_000, "java.lang.NullPointerException", "x is null", f"android.view.View.performClick|{APP}.Main.onClick"),
         _exc(1_600_000, "java.io.IOException", "both", "java.io.File.open|" + f"{APP}.Io.read"),
         _lc(1_100_000, "onCreate"), _lc(1_200_000, "onStart"),
     ], 'E/linker: dlopen failed: library "libsqlcipher.so" not found\nALSA lib pcm.c: Unknown PCM default\n', STUBS)
@@ -76,9 +76,13 @@ def test_markdown_is_short_with_many_findings(pair, tmp_path):
     atl, _ = pair
     many = "".join(f"N\t{i}\tandroid.x.C{i}\tm\t()V\tempty\nS\t2500000\t{i}\t{i}\n" for i in range(10, 200))
     (atl / "stubhits.tsv").write_text(STUBS + many)
+    with open(atl / "agent.tsv", "a") as f:
+        f.write(_exc(1_800_000, "javax.net.ssl.SSLPeerUnverifiedException", "Hostname not verified: " + "x" * 400,
+                     f"{APP}.Net.get") + "\n")
     d = build_comparison(*pair, tmp_path / "out", no_aosp_fetch=True)
     md = render_markdown(d)
     assert len(md.splitlines()) <= MAX_LINES
+    assert max(len(x) for x in md.splitlines()) <= 240
     assert md.splitlines()[0].startswith("# atl-doctor vergleich")
     assert "## Likely causes" in md and md.index("## Likely causes") < md.index("## Stubs hit")
 
@@ -127,3 +131,64 @@ def test_cli_records_light_by_default_and_full_with_tief(tmp_path, monkeypatch, 
     assert seen[0] == ("atl", True, True, steps, None) and seen[1] == ("android", steps)
     default = tmp_path / "b/szenario.steps"                     # without --szenario: wait, then one screenshot
     assert seen[2] == ("atl", False, True, default, "flatpak run X") and "screenshot" in default.read_text()
+
+
+def test_exception_inside_the_platform_ranks_below_one_through_the_app(pair, tmp_path):
+    atl, _ = pair
+    with open(atl / "agent.tsv", "a") as f:
+        for t in (1_700_000, 1_710_000, 1_720_000):
+            f.write(_exc(t, "java.nio.file.FileAlreadyExistsException", "/data/lib", "java.nio.file.Files.createDirectory|"
+                         "android.atl.Natives.extract").replace(f"{APP}.Main.onClick", "android.atl.Natives.extract") + "\n")
+    d = build_comparison(*pair, tmp_path / "out", no_aosp_fetch=True)
+    titles = [c["title"] for c in d["causes"]]
+    assert titles.index("java.lang.NullPointerException: x is null") < titles.index("native library does not load: libsqlcipher.so")
+    assert titles.index("native library does not load: libsqlcipher.so") < \
+        titles.index("java.nio.file.FileAlreadyExistsException: /data/lib")
+    assert d["causes"][0]["phase"] == "Suche"
+
+
+def test_scenario_errors_are_in_the_report(tmp_path, monkeypatch, pair):
+    import atl_doctor.vergleich as v
+    from atl_doctor.errors import DoctorError
+
+    def fail(opts):
+        raise DoctorError("s.steps:13: no visible view matches id/suw_navbar_done")
+
+    monkeypatch.setattr(v, "record_atl", fail)
+    monkeypatch.setattr(v, "record_android", lambda opts: 0)
+    import shutil
+    shutil.copytree(pair[0], tmp_path / "v/atl")
+    shutil.copytree(pair[1], tmp_path / "v/android")
+    assert main(["vergleich", "-o", str(tmp_path / "v"), "--prefix", str(tmp_path), "--no-aosp-fetch", "x.apk"]) == 0
+    md = (tmp_path / "v/bericht.md").read_text()
+    assert "Scenario stopped on ATL: s.steps:13: no visible view matches id/suw_navbar_done" in md.splitlines()[2]
+
+
+def test_side_whose_app_ended_before_the_scenario_is_named(pair, tmp_path):
+    atl, android = pair
+    for side, stopped in ((atl, "steps"), (android, None)):
+        c = Capture.open(side)
+        m = c.read_manifest()
+        m.environment = {"stopped_by": stopped} if stopped else {}
+        c.write_manifest(m)
+    (android / "steps.log").write_text("22:40:01 s:3: wait 20.0\n")
+    (atl / "steps.log").write_text("22:40:01 s:3: wait 20.0\n")
+    d = build_comparison(*pair, tmp_path / "out", no_aosp_fetch=True)
+    assert d["unfinished"] == ["Android"]
+    assert "Scenario not finished on Android: the app ended" in render_markdown(d)
+
+
+def test_what_happens_during_the_scenario_ranks_above_the_start(pair, tmp_path):
+    """Startup findings (phase 0) are often noise next to what a step triggers: a lifecycle difference after a
+    mark ranks above an exception through the app at startup."""
+    atl, android = pair
+    with open(atl / "agent.tsv", "a") as f:
+        f.write(_exc(1_300_000, "java.lang.IllegalStateException", "early", f"android.app.Activity.attach|{APP}.App.init") + "\n")
+        f.write(_lc(2_100_000, "onResume") + "\n")
+    with open(android / "agent.tsv", "a") as f:
+        f.write(_lc(2_100_000, "onResume") + "\n")
+        f.write(_lc(2_200_000, "onWindowFocusChanged") + "\n")
+    d = build_comparison(*pair, tmp_path / "out", no_aosp_fetch=True)
+    titles = [c["title"] for c in d["causes"]]
+    focus = next(t for t in titles if "onWindowFocusChanged" in t)
+    assert titles.index(focus) < titles.index("java.lang.IllegalStateException: early")

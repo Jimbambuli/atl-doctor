@@ -269,3 +269,18 @@ def test_selinux_mode_is_restored_not_forced(adb, apk, tmp_path, before, restore
     c = calls(adb)
     assert "shell setenforce 0" in c
     assert ("shell setenforce 1" in c) == restored
+
+
+def test_android_start_state_loads_avd_snapshot_before_install(adb, apk, tmp_path):
+    table(adb)
+    t = json.loads((adb / "table.json").read_text())
+    t["emu avd snapshot"] = ["OK\n", 0]
+    (adb / "table.json").write_text(json.dumps(t))
+    steps = tmp_path / "s.steps"
+    steps.write_text('start_zustand: eingerichtet\nwait 0\n')
+    out = tmp_path / "c"
+    assert main(["record", "--android", "--steps", str(steps), "-o", str(out), str(apk)]) == 0
+    c = calls(adb)
+    load = c.index(f"emu avd snapshot load atl-doctor-{PKG}-eingerichtet")
+    assert load < next(i for i, x in enumerate(c) if x.startswith("install -r "))
+    assert Capture.open(out).read_manifest().environment["start_state"] == "eingerichtet"

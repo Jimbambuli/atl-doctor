@@ -5,6 +5,8 @@ One command per line or separated by ';', '#' starts a comment outside quotes:
     wait-window "Title" [TIMEOUT]   click "Text" | click id/NAME | click X,Y (dp)   key NAME[+NAME]
     type "text"   scroll N   scroll-smooth DY   wait SECONDS   wait-idle [TIMEOUT]   mark ["name"]   screenshot "name"
     repeat N { ... }   (also over several lines, nested)
+A scenario may begin with `start_zustand: NAME`: the app's state saved with `atl-doctor zustand sichern` is loaded
+before the app starts.
 """
 from __future__ import annotations
 
@@ -165,8 +167,31 @@ def _command(name: _Tok, args: list[_Tok], filename: str) -> Step:
     raise err(f"unknown command '{cmd}'")
 
 
+_START_STATE = re.compile(r"^\s*start_zustand:\s*(\S+)\s*$")
+
+
+def _split_start_state(text: str, filename: str) -> tuple[str | None, str]:
+    """The name of a leading `start_zustand: NAME` line and the text with that line blanked (line numbers stay)."""
+    lines = text.split("\n")
+    first = next((i for i, x in enumerate(lines) if x.split("#", 1)[0].strip()), None)
+    name = None
+    for i, line in enumerate(lines):
+        m = _START_STATE.match(line)
+        if not m:
+            continue
+        if i != first:
+            raise StepError(filename, i + 1, "start_zustand only once, before the first step")
+        name, lines[i] = m.group(1), ""
+    return name, "\n".join(lines)
+
+
+def start_state(text: str, filename: str = "-") -> str | None:
+    """Name of the state a scenario starts from (`start_zustand: NAME`), or None."""
+    return _split_start_state(text, filename)[0]
+
+
 def parse_steps(text: str, filename: str) -> list[Step | Repeat]:
-    toks = _tokens(text, filename)
+    toks = _tokens(_split_start_state(text, filename)[1], filename)
     pos = 0
 
     def block(opened: _Tok | None) -> list[Step | Repeat]:

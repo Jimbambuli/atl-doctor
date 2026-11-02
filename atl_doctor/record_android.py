@@ -140,17 +140,22 @@ def record_android(opts: RecordOptions) -> int:
     if serial is None:
         raise PrerequisiteMissing("--android needs a device: no device attached (check `adb devices`)")
     adb = Adb(serial)
-    steps = None
+    steps, state = None, None
     if opts.steps:
-        from .steps import parse_steps
+        from .steps import parse_steps, start_state
         try:
-            steps = parse_steps(opts.steps.read_text(encoding="utf-8"), str(opts.steps))
+            text = opts.steps.read_text(encoding="utf-8")
         except OSError as e:
             raise DoctorError(f"cannot read {opts.steps}: {e.strerror}") from e
+        steps, state = parse_steps(text, str(opts.steps)), start_state(text, str(opts.steps))
     info = read_apk(opts.apk)
     if not info.package:
         raise DoctorError(f"{opts.apk}: no package name in the manifest")
     pkg = info.package
+    if state:
+        from .zustand import load_start_state
+
+        _warn(f"start state {state}: {load_start_state(state, opts.apk, True)}")
     opts.apk = opts.apk.resolve()
     out = (opts.out or Path(f"{default_out_dir(datetime.now())}-android")).resolve()
     cap = Capture.create(out, "android")
@@ -182,6 +187,8 @@ def record_android(opts: RecordOptions) -> int:
     m.probes = [asdict(p) for p in probes]
     m.environment = {"serial": serial, **({"abi": abi} if abi else {}),
                      **({"density": str(density)} if density else {})}
+    if state:
+        m.environment["start_state"] = state
     boot = adb.boot_us()
     if boot is not None:  # phase 0 on the device's clock
         cap.path(MARKS).write_text("")

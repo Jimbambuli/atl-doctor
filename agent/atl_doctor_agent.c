@@ -500,6 +500,18 @@ static void JNICALL hang_watchdog(jvmtiEnv *je, JNIEnv *jni, void *arg) {
 			continue;
 		}
 		if (!since) since = t;
+		/* a blockade that does not end would never be written: every 10 s its current stack as "H" (still blocked) */
+		if (over && t - since >= 10000000 && ((t - since) / 1000) % 10000 < HANG_SAMPLE_MS + 5
+		    && (*J)->GetStackTrace(J, main_t, 0, 24, fr, &cnt) == JVMTI_ERROR_NONE) {
+			char b[16512]; size_t bn = (size_t)snprintf(b, sizeof b, "H\t%lld\t%d\t%lld\t", (long long)t, (int32_t)getpid(),
+			                                          (long long)((t - since) / 1000));
+			for (jint i = 0; i < cnt && bn < sizeof b - 600; i++) {
+				struct mc *e = method(fr[i].method);
+				bn += (size_t)snprintf(b + bn, sizeof b - bn, "%s%s%s", i ? "|" : "", (e && e->boot) ? "B:" : "", e ? e->txt : "?");
+			}
+			b[bn++] = 0x0a;
+			emit(b, bn);
+		}
 		if (!over && t - since >= (int64_t)opt_hang_ms * 1000
 		    && (*J)->GetStackTrace(J, main_t, 0, 24, fr, &cnt) == JVMTI_ERROR_NONE) {
 			sn = 0; stack[0] = 0;

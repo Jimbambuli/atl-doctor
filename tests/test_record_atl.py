@@ -680,3 +680,45 @@ def test_build_command_light_attaches_agent_samples_and_counts_stubs(tmp_path):
     assert env == {"LD_LIBRARY_PATH": "/p/lib64:/p/lib64/art", "ATL_STUB_HITS": f"{c}/stubhits.tsv"}
     cmd, _ = build_command(opts, cap, None, Path("/h/libatl_doctor_agent.so"), trace=False)
     assert cmd[-1].endswith(",hang=100")  # no counter: no sampling
+
+
+def test_counter_is_stopped_when_the_recording_fails(tmp_prefix, apk, tmp_path, monkeypatch):
+    """An error while recording (e.g. a full disk) must not leave the counter behind: it waits for its stop file."""
+    import atl_doctor.record_atl as ra
+    helpers = tmp_prefix / "lib/atl-doctor"
+    helpers.mkdir(parents=True)
+    pidfile = tmp_path / "counter.pid"
+    (helpers / "atl-doctor-tracecount").write_text(
+        f"#!/bin/sh\necho $$ > {pidfile}\nwhile [ ! -e \"$3.stop\" ]; do sleep 0.1; done\n: > \"$3.counts\"\n")
+    (helpers / "atl-doctor-tracecount").chmod(0o755)
+
+    def full(*_a, **_k):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(ra, "_record_loop", full)
+    with pytest.raises(OSError):
+        main(["record", "-o", str(tmp_path / "c"), "--prefix", str(tmp_prefix), "--atl-src",
+              str(HERE / "data/atl-src"), str(apk)])
+    assert wait_for(pidfile.exists)
+    pid = int(pidfile.read_text())
+    assert wait_for(lambda: not os.path.exists(f"/proc/{pid}") or
+                    open(f"/proc/{pid}/stat").read().split()[2] == "Z", 15), "counter left running"
+
+
+def test_counter_ends_with_a_killed_recorder(built, tmp_prefix, apk, tmp_path):
+    """SIGKILL of `record` (no cleanup possible): the counter must not outlive it waiting for its stop file."""
+    helpers = tmp_prefix / "lib/atl-doctor"
+    helpers.mkdir(parents=True)
+    shutil.copy(built / "atl-doctor-tracecount", helpers)
+    c = tmp_path / "c"
+    code = ("import sys; from atl_doctor.cli import main; "
+            f"sys.exit(main(['record', '-o', {str(c)!r}, '--prefix', {str(tmp_prefix)!r}, "
+            f"'--atl-src', {str(HERE / 'data/atl-src')!r}, {str(apk)!r}, '--', '--trace', '--wait']))")
+    p = subprocess.Popen([sys.executable, "-c", code], env={**os.environ, "PYTHONPATH": str(HERE.parent)})
+    assert wait_for(lambda: (c / "control").exists() and "fake atl" in (c / "atl.log").read_text())
+    counter = subprocess.run(["pgrep", "-P", str(p.pid), "atl-doctor-trac"], capture_output=True, text=True)
+    pids = [int(x) for x in counter.stdout.split()]
+    assert pids
+    p.kill()
+    p.wait()
+    assert wait_for(lambda: all(not os.path.exists(f"/proc/{x}") for x in pids), 10), "counter outlived record"
+    os.killpg(int(Capture.open(c).read_manifest().environment["atl_pid"]), signal.SIGKILL)  # this test's fake ATL

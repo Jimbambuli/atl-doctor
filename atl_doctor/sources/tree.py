@@ -369,9 +369,18 @@ def tree_findings(android: list[Node], atl: list[Node], phase: Mark, threshold_d
 def find_node(nodes: list[Node], selector: str) -> Node | None:
     """First visible node matching `id/foo` or a text/description (case and whitespace insensitive)."""
     if selector.startswith("id/"):
-        return next((n for n in nodes if n.visible and n.rid == selector), None)
-    want = _norm(selector).casefold()
-    return next((n for n in nodes if n.visible and want in (n.text.casefold(), n.desc.casefold())), None)
+        found = [n for n in nodes if n.visible and n.rid == selector]
+    else:
+        want = _norm(selector).casefold()
+        found = [n for n in nodes if n.visible and want in (n.text.casefold(), n.desc.casefold())]
+    # a view outside the content (the neighbour page of a ViewPager) only when no other is on screen
+    content = next((n for n in nodes if n.full_id == "android:id/content"), None)
+    w, h = (content.rect[2] - content.rect[0], content.rect[3] - content.rect[1]) if content else (float("inf"), float("inf"))
+
+    def on_screen(n: Node) -> bool:
+        cx, cy = (n.rect[0] + n.rect[2]) / 2, (n.rect[1] + n.rect[3]) / 2
+        return n.rect[2] > n.rect[0] and n.rect[3] > n.rect[1] and 0 <= cx < w and 0 <= cy < h
+    return next((n for n in found if on_screen(n)), found[0] if found else None)
 
 
 def request_atl_tree(trees_dir: Path, name: str, timeout_s: float = 10.0) -> Path | None:

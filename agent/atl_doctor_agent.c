@@ -274,6 +274,11 @@ static void check_class(JNIEnv *jni, jclass k) {
 	if (!k_fragment && !strcmp(s, "Landroidx/fragment/app/Fragment;")) k_fragment = (*jni)->NewGlobalRef(jni, k);
 	if (!k_view && !strcmp(s, "Landroid/view/View;")) k_view = (*jni)->NewGlobalRef(jni, k);
 	(*J)->Deallocate(J, (unsigned char *)s);
+	/* no breakpoints in interfaces (Window$Callback itself): a breakpoint in a default method makes ART deoptimize
+	   every method of the runtime (DeoptManager::AddMethodBreakpoint), the app then runs interpreted (JW Library:
+	   content after 9.6 s instead of 1.8 s); the implementing classes get theirs */
+	jboolean itf = JNI_FALSE;
+	if ((*J)->IsInterface(J, k, &itf) == JVMTI_ERROR_NONE && itf) return;
 	uint8_t g = 0;
 	if (is_subclass(jni, k, k_activity)) g |= G_ACT;
 	if (is_subclass(jni, k, k_wincb)) g |= G_WIN;

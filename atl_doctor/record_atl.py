@@ -398,6 +398,11 @@ def record_atl(opts: RecordOptions) -> int:
                 driver = make_atl_driver(cap, session, opts, info.package)
                 steps_state = _start_steps(cap, driver, steps, str(opts.steps))
             rc = _record_loop(cap, proc, stop, ctl, trees, steps_state, session, memory=not opts.launcher)
+    except BaseException:
+        if count_proc:  # e.g. a full disk: the counter would wait for its stop file forever
+            count_proc.kill()
+            count_proc.wait()
+        raise
     finally:
         if driver is not None:
             driver.close()

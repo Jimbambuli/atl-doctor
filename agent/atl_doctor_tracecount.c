@@ -24,7 +24,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <string.h>
+#include <sys/prctl.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -247,6 +249,10 @@ static void write_results(const char *out) {
 
 int main(int argc, char **argv) {
 	if (argc != 6) { fprintf(stderr, "usage: atl-doctor-tracecount TRACE MARKS OUTPREFIX WATCH APP_PREFIX\n"); return 2; }
+	// started by `record` in its own session: end with it, even when it is killed before it can touch .stop
+	pid_t parent = getppid();
+	prctl(PR_SET_PDEATHSIG, SIGTERM);
+	if (getppid() != parent) return 1;
 	marksfile = argv[2]; app_pfx = argv[5];
 	const char *out = argv[3];
 	mflag = need(calloc(MAXM, 1));

@@ -47,6 +47,11 @@ atl-doctor report run1 android-run1                   # ATL against Android, pha
 atl-doctor report --log crash.log                     # evaluate an ATL log without a recording
 atl-doctor explain -d run1 3f2a                       # everything about one finding (short ID)
 atl-doctor diff before.json after.json --fail-on new  # after a fix: new, gone, changed; exit 4 for CI
+atl-doctor vergleich -o v1 --prefix ~/.local/opt/atl --szenario s.steps app.apk
+                                                      # same scenario under ATL and on Android: v1/bericht.md
+                                                      # (<= 60 lines, likely causes first) and v1/bericht.json
+atl-doctor zustand sichern app.apk eingerichtet       # app data (ATL) or AVD snapshot (--android) by name;
+                                                      # a step file can begin with `start_zustand: eingerichtet`
 ```
 
 A jank finding needs at least 30 frames in the phase (`--jank-min-frames N`); with fewer, the report only notes

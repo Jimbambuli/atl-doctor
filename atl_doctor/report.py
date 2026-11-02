@@ -38,7 +38,7 @@ def _kind_in(*kinds: str) -> Callable[[Finding], bool]:
 SECTIONS: list[tuple[str, Callable[[Finding], bool]]] = [
     ("Environment", lambda f: False),
     ("Fix first", lambda f: False),
-    ("Hit stubs", lambda f: f.kind in ("stub", "stublog") and not _like_aosp(f)),
+    ("Hit stubs", lambda f: f.kind in ("stub", "stublog") and not like_aosp(f)),
     ("Missing methods/classes", _kind_in("missing")),
     ("Exceptions", _kind_in("exc")),
     ("Crashes", _kind_in("crash")),
@@ -49,7 +49,8 @@ SECTIONS: list[tuple[str, Callable[[Finding], bool]]] = [
 ]
 
 
-def _like_aosp(f: Finding) -> bool:
+def like_aosp(f: Finding) -> bool:
+    """True for a stub hit that is as trivial in AOSP (after apply_aosp): not counted as an ATL gap."""
     return bool(f.details.get("like_aosp"))
 
 
@@ -111,7 +112,7 @@ def _notes(r: Report) -> list[str]:
     hist = r.extras.get("target_sdk_histogram", {})
     if hist:
         extra.append("target SDK: " + ", ".join(f"{k}: {v}" for k, v in hist.items()))
-    like = [f for f in rank(r.findings) if _like_aosp(f)]
+    like = [f for f in rank(r.findings) if like_aosp(f)]
     if like:
         names = ", ".join(f.key for f in like[:20]) + (" ..." if len(like) > 20 else "")
         extra.append(f"{len(like)} stub hit{'s' if len(like) > 1 else ''} behave like AOSP (trivial there as well, "
@@ -400,7 +401,9 @@ def apply_aosp(r: Report, aosp: str | None, prefix: str | None, stubs: dict, wor
         r.environment["aosp_deps"] = "not checked against ATL (no ATL jars; recorded prefix or $ATL_DOCTOR_PREFIX)"
 
 
-def _apply_capture_aosp(r: Report, root: Path, aosp: str | None, no_fetch: bool = False) -> None:
+def apply_capture_aosp(r: Report, root: Path, aosp: str | None = None, no_fetch: bool = False) -> None:
+    """AOSP comparison for a capture report (build_capture_report), like `atl-doctor report DIR`: --aosp DIR or
+    $ATL_DOCTOR_AOSP, else the cached or fetched AOSP source; without both r.environment["aosp"] says why."""
     from .capture import TRACE_DIR, Capture
     from .sources.stubs import load_stub_tsv, stub_index
 
@@ -543,7 +546,7 @@ def _report_capture(args: argparse.Namespace) -> int:
         r, root = build_pair_report(Path(args.dirs[0]), Path(args.dirs[1]), args.density, args.jank_min_frames)
     else:
         r, root = build_capture_report(Path(args.dirs[0]), args.jank_min_frames)
-    _apply_capture_aosp(r, root, args.aosp, args.no_aosp_fetch)
+    apply_capture_aosp(r, root, args.aosp, args.no_aosp_fetch)
     return _emit(args, r, root)
 
 
@@ -563,7 +566,7 @@ def render_explain(f: Finding, r: Report, capture_dir: Path | None) -> str:
     if f.details:
         out += ["", "details:", json.dumps(f.details, indent=2, sort_keys=True, ensure_ascii=False)]
     a = f.details.get("aosp")
-    if _like_aosp(f):
+    if like_aosp(f):
         from .sources.aosp import aosp_line
 
         out += ["", aosp_line(f) or ""]
@@ -607,7 +610,7 @@ def _run_explain(args: argparse.Namespace) -> int:
     if resolve(args.aosp, "ATL_DOCTOR_AOSP") and f.kind in ("stub", "missing") and "#" in f.key:
         one = Report(r.mode, {}, [], [], [f])
         if root:
-            _apply_capture_aosp(one, root, args.aosp, args.no_aosp_fetch)
+            apply_capture_aosp(one, root, args.aosp, args.no_aosp_fetch)
         else:
             apply_aosp(one, args.aosp, None, {}, no_fetch=args.no_aosp_fetch)
     sys.stdout.write(render_explain(f, r, root))

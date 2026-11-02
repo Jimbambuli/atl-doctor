@@ -111,3 +111,22 @@ def test_no_fetch_switch(tmp_path, monkeypatch):
     r = Report("record", {}, [], ["p"], _findings("isInEditMode"))
     apply_aosp(r, None, None, stub_index(_entries()), no_fetch=True)
     assert "AOSP comparison not possible" in r.environment["aosp"] and "--no-aosp-fetch" in r.environment["aosp"]
+
+
+def test_apply_capture_aosp_public_api(mirror, tmp_path, monkeypatch):
+    """What a program that shows reports (apk-starter) calls after build_capture_report: like `report DIR`."""
+    from atl_doctor.capture import TRACE_DIR, Capture
+    from atl_doctor.report import Report, apply_capture_aosp, like_aosp
+    from atl_doctor.sources.stubs import save_stub_tsv
+    from test_like_aosp import _entries, _findings
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("ATL_DOCTOR_AOSP_URL", str(mirror))
+    cap = Capture.create(tmp_path / "rec", "atl")
+    cap.path(TRACE_DIR).mkdir()
+    save_stub_tsv(_entries(), cap.path(TRACE_DIR) / "stubs.tsv")
+    fs = _findings("isInEditMode", "isShown")
+    r = Report("record", {}, [], ["p"], fs)
+    apply_capture_aosp(r, cap.root)
+    assert [like_aosp(f) for f in fs] == [True, False]
+    assert r.environment["aosp"].endswith("android-14.0.0_r10")

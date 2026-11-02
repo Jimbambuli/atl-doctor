@@ -274,3 +274,21 @@ def test_wait_window_without_a_watch_polls_the_windows(tmp_path):
     d = AtlDriver(Capture.create(tmp_path / "c", "atl"), S(0), tmp_path / "fifo", tmp_path / "st",
                   has_tree=False, frames=False)
     assert d.wait_window("Demo", 5) and d.event_us is None and d.session.placed == 1
+
+
+# ------------------------------------------------------------------ start_zustand
+def test_start_state_read_from_first_line():
+    from atl_doctor.steps import start_state
+
+    assert start_state("# Aurora\nstart_zustand: eingerichtet\nclick \"Suche\"\n") == "eingerichtet"
+    assert start_state("click \"Suche\"\n") is None
+
+
+def test_start_state_line_is_no_step_and_keeps_line_numbers():
+    steps = parse_steps("start_zustand: x\nwait 1\n", "s")
+    assert steps == [Step(2, "wait", (1.0,))]
+
+
+def test_start_state_only_before_the_first_step():
+    with pytest.raises(StepError, match="s:2: start_zustand"):
+        parse_steps("wait 1\nstart_zustand: x\n", "s")

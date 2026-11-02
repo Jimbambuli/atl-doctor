@@ -8,7 +8,7 @@ import pytest
 from atl_doctor.cli import build_parser, main
 
 MAN = Path(__file__).parent.parent / "doc" / "atl-doctor.1"
-COMMANDS = ["record", "mark", "report", "diff", "explain", "check", "scan"]
+COMMANDS = ["record", "mark", "report", "diff", "explain", "check", "scan", "vergleich", "zustand"]
 
 
 def _subparsers():

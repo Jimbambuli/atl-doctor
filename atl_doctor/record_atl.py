@@ -263,7 +263,8 @@ def _start_steps(cap: Capture, driver, steps: list, filename: str) -> dict:
 
 def record_atl(opts: RecordOptions) -> int:
     from .sources.dex import read_apk
-    from .steps import parse_steps
+    from .steps import parse_steps, start_state
+    from .zustand import load_start_state
 
     if opts.launcher:
         import shutil
@@ -275,12 +276,13 @@ def record_atl(opts: RecordOptions) -> int:
         atl = opts.prefix / "bin/android-translation-layer"
         if not atl.is_file():
             raise PrerequisiteMissing(f"{atl} not found (pass the ATL installation prefix with --prefix)")
-    steps = None
+    steps, state = None, None
     if opts.steps:
         try:
-            steps = parse_steps(opts.steps.read_text(encoding="utf-8"), str(opts.steps))
+            text = opts.steps.read_text(encoding="utf-8")
         except OSError as e:
             raise DoctorError(f"cannot read {opts.steps}: {e.strerror}") from e
+        steps, state = parse_steps(text, str(opts.steps)), start_state(text, str(opts.steps))
         if not opts.headless:
             _warn("--steps implies --headless")
             opts.headless = True
@@ -293,6 +295,8 @@ def record_atl(opts: RecordOptions) -> int:
         raise PrerequisiteMissing(f"agent {explicit_agent} not found (--agent / ATL_DOCTOR_AGENT)")
     info = read_apk(opts.apk)
     opts.apk = Path(os.path.abspath(opts.apk))  # not resolved: ATL may name things after a symlink's name
+    if state:
+        _warn(f"start state {state}: {load_start_state(state, opts.apk, False, opts.launcher)}")
     out = (opts.out or default_out_dir(datetime.now())).resolve()
     # the capture path goes into the agent's comma-separated options and its 512-byte path buffers
     if "," in str(out):
@@ -363,6 +367,8 @@ def record_atl(opts: RecordOptions) -> int:
             "off (--no-trace): no time line; stub hits counted by ATL"
     elif opts.light:
         m.environment["trace"] = f"sampling every {SAMPLE_US} us (--light); stub hits counted by ATL"
+    if state:
+        m.environment["start_state"] = state
     cap.write_manifest(m)
 
     session = driver = None

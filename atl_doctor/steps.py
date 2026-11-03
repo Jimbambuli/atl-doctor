@@ -410,7 +410,8 @@ class AtlDriver:
     """ATL in a headless KWin: input through atl-doctor-input, targets from ATLViewDump trees.
 
     dp coordinates are relative to android:id/content of the activity window, as in the trees; the
-    content origin comes from the latest tree (without one: the window frame's top left corner).
+    content origin comes from the latest tree; a click before any tree takes one first (without
+    ATLViewDump: the window frame's top left corner, which lies above GTK's title bar).
     """
 
     def __init__(self, cap: "Capture", session: "HeadlessSession", input_fifo: Path, input_status: Path,
@@ -418,6 +419,7 @@ class AtlDriver:
         self.cap, self.session, self.has_tree, self.frames, self.package = cap, session, has_tree, frames, package
         self.input_fifo, self.input_status = Path(input_fifo), Path(input_status)
         self.content = (0.0, 0.0)  # content origin in window pixels
+        self._tree_taken = False   # the content origin comes from a tree
         self._fd: int | None = None
         self._ping = 0
         self._status_pos = 0
@@ -487,21 +489,31 @@ class AtlDriver:
         return w["surface"][0] + self.content[0], w["surface"][1] + self.content[1]
 
     def click(self, x_dp: float, y_dp: float) -> None:
+        if not self._tree_taken and self.has_tree:
+            self._tree()  # learn the content origin, else X,Y would be off by the title bar
         ox, oy = self._origin()
         self._send(f"click {round(ox + x_dp)} {round(oy + y_dp)}")
 
-    def locate(self, selector: str) -> tuple[float, float] | None:
+    def _tree(self) -> list:
+        """A fresh view tree; it sets the content origin."""
         from .capture import TREES
-        from .sources.tree import find_node, load_tree, request_atl_tree
+        from .sources.tree import load_tree, request_atl_tree
 
         self._n_tree += 1
         path = request_atl_tree(self.cap.path(TREES), f"step-{self._n_tree:03d}")
         if path is None:
             raise DoctorError("ATLViewDump did not answer")
+        self._tree_taken = True
         nodes = load_tree(path, "atl")
         content = next((n for n in nodes if n.full_id == "android:id/content" and n.window.startswith("activity")), None)
         if content and content.gtk_rect:
             self.content = (content.gtk_rect[0], content.gtk_rect[1])
+        return nodes
+
+    def locate(self, selector: str) -> tuple[float, float] | None:
+        from .sources.tree import find_node
+
+        nodes = self._tree()
         n = find_node(nodes, selector)
         if n is None or n.gtk_rect is None:
             return None
@@ -655,6 +667,7 @@ class AndroidDriver:
         self.serial, self.cap, self.package, self.density = serial, cap, package, density
         self.has_tree = True
         self.content = (0.0, 0.0)  # content origin in device pixels
+        self._tree_taken = False
         self._n_tree = 0
 
     def _adb(self, *args: str, timeout: float = 30) -> str:
@@ -670,11 +683,22 @@ class AndroidDriver:
         return round(self.content[0] + x_dp * self.density), round(self.content[1] + y_dp * self.density)
 
     def click(self, x_dp: float, y_dp: float) -> None:
+        if not self._tree_taken:
+            self._tree()  # learn the content origin (below the status bar), as on ATL
         self._adb("shell", "input", "tap", *map(str, self._px(x_dp, y_dp)))
 
     def locate(self, selector: str) -> tuple[float, float] | None:
+        from .sources.tree import find_node, load_tree
+
+        n = find_node(load_tree(self._tree(), "android", self.density), selector)
+        if n is None:
+            return None
+        return (n.rect[0] + n.rect[2]) / 2, (n.rect[1] + n.rect[3]) / 2
+
+    def _tree(self) -> Path:
+        """A fresh uiautomator dump; it sets the content origin."""
         from .capture import TREES
-        from .sources.tree import _rect, find_node, load_tree
+        from .sources.tree import _rect
 
         self._n_tree += 1
         out = self.cap.path(TREES) / f"step-{self._n_tree:03d}.xml"
@@ -684,13 +708,11 @@ class AndroidDriver:
         import xml.etree.ElementTree as ET
         root = ET.parse(out).getroot()
         content = next((e for e in root.iter("node") if e.get("resource-id") == "android:id/content"), None)
+        self._tree_taken = True
         if content is not None:
             r = _rect(content.get("bounds", "[0,0][0,0]"))
             self.content = (r[0], r[1])
-        n = find_node(load_tree(out, "android", self.density), selector)
-        if n is None:
-            return None
-        return (n.rect[0] + n.rect[2]) / 2, (n.rect[1] + n.rect[3]) / 2
+        return out
 
     def scroll_tree(self) -> list | None:
         from .capture import TREES

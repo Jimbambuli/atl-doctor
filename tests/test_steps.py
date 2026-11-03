@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import io
 import time
+from pathlib import Path
 
 import pytest
 
@@ -142,11 +143,23 @@ def test_atl_driver_maps_tree_to_screen(tmp_path, monkeypatch):
     d = AtlDriver(cap, _Session(), tmp_path / "fifo", tmp_path / "status", has_tree=True, frames=False)
     sent = []
     monkeypatch.setattr(d, "_send", sent.append)
-    d.click(5, 5)                       # no tree yet: relative to the window frame
-    pos = d.locate("id/save")           # GTK rect [110,320][310,340], content at 10,20
+    d.click(5, 5)                       # no tree yet: one is taken first, content at 10,20
+    pos = d.locate("id/save")           # GTK rect [110,320][310,340]
     assert pos == (200.0, 310.0)
     d.click(*pos)                       # surface origin -14,-12 + GTK centre 210,330
-    assert sent == ["click 5 5", "click 196 318"]
+    assert sent == ["click 1 13", "click 196 318"]
+
+
+def test_atl_driver_click_without_tree_dump_uses_the_window_frame(tmp_path, monkeypatch):
+    from atl_doctor.capture import Capture
+    from atl_doctor.steps import AtlDriver
+
+    d = AtlDriver(Capture.create(tmp_path / "c", "atl"), _Session(), tmp_path / "fifo", tmp_path / "status",
+                  has_tree=False, frames=False)
+    sent = []
+    monkeypatch.setattr(d, "_send", sent.append)
+    d.click(5, 5)
+    assert sent == ["click 5 5"]
 
 
 def test_example_step_files_parse():
@@ -312,3 +325,28 @@ def test_click_with_android_coordinates():
     a = A()
     run_steps([s], a, "t", io.StringIO())
     assert a.clicks == [(1289.0, 612.0)]
+
+
+def test_android_click_is_relative_to_the_content_like_on_atl(tmp_path):
+    """X,Y is relative to android:id/content on both sides: the first click learns where it lies."""
+    from atl_doctor.capture import Capture
+    from atl_doctor.steps import AndroidDriver
+
+    cap = Capture.create(tmp_path / "c", "android")
+    (tmp_path / "c/trees").mkdir()
+    calls = []
+
+    class A(AndroidDriver):
+        def _adb(self, *args, timeout=30):
+            calls.append(args)
+            if args[0] == "pull":
+                Path(args[2]).write_text('<hierarchy><node resource-id="android:id/content" '
+                                         'bounds="[0,63][2667,1600]"/></hierarchy>')
+            return ""
+
+    a = A("emu", cap, "org.example", 2.625)
+    a.click(10, 20)
+    a.click(10, 20)
+    taps = [c for c in calls if c[:2] == ("shell", "input")]
+    assert taps == [("shell", "input", "tap", "26", "116")] * 2
+    assert sum(1 for c in calls if c[0] == "pull") == 1

@@ -150,7 +150,8 @@ def render_markdown(d: dict) -> str:
     section("Lifecycle differences", "lifecycle", lambda i, x: f"- {_t(x['title'])}")
     section("Missing native pieces", "native", lambda i, n: f"- {n['count']}x {_t(n['title'])}")
     section("Screenshots (worst first)", "shots", lambda i, s: f"- {s['step']}: similarity {s['similarity']}, "
-            f"{round(s['different'] * 100)} % different" + (f", {s['finding']}" if s["finding"] else ""))
+            f"{round(s['different'] * 100)} % different" + (f", {s['finding']}" if s["finding"] else "")
+                                       + (f" [{s['area']}]" if s.get("area") else ""))
     return "\n".join(out[:MAX_LINES]) + "\n"
 
 

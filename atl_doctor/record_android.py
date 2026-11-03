@@ -57,6 +57,16 @@ class Adb:
         return self.shell("pidof", package).split()
 
 
+def parse_insets(dumpsys_window: str) -> tuple[int, int] | None:
+    """`dumpsys window`: (status bar height, navigation bar height) in pixels from the InsetsSource lines."""
+    got: dict[str, int] = {}
+    for kind, x0, y0, x1, y1 in re.findall(
+            r"InsetsSource[^\n]*?type=(statusBars|navigationBars)[^\n]*?frame=\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
+            dumpsys_window):
+        got[kind] = max(got.get(kind, 0), int(y1) - int(y0))
+    return (got.get("statusBars", 0), got.get("navigationBars", 0)) if got else None
+
+
 def density_of(wm_output: str) -> float | None:
     """`wm density`: the override if set, else the physical density, as a factor of 160 dpi."""
     vals = dict(re.findall(r"(Physical|Override) density:\s*(\d+)", wm_output))
@@ -191,6 +201,9 @@ def record_android(opts: RecordOptions) -> int:
     m.probes = [asdict(p) for p in probes]
     m.environment = {"serial": serial, **({"abi": abi} if abi else {}),
                      **({"density": str(density)} if density else {})}
+    insets = parse_insets(adb.shell("dumpsys", "window"))
+    if insets:
+        m.environment["insets"] = f"{insets[0]},{insets[1]}"   # px, top and bottom system bars
     if state:
         m.environment["start_state"] = state
     boot = adb.boot_us()

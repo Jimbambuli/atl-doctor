@@ -3,8 +3,9 @@
 
 Taken over from the experiment tool bildvergleich.py, without PIL: both pictures are cut to the app content in dp
 (ATL: window surface origin plus content origin from the view tree of that name, else from any other tree;
-Android: content origin from a view tree likewise, else below a 24 dp status bar; without the 48 dp navigation
-bar at the bottom), reduced to grey cells of CELL_DP and compared over
+Android: content origin from a view tree likewise, without the system bars: status and navigation bar heights from the
+view tree (statusBarBackground, navigationBarBackground), else from the insets recorded at capture time
+(manifest `insets`, `dumpsys window`), else default 24/48 dp; the row's `area` says which), reduced to grey cells of CELL_DP and compared over
 the common area. Similarity is 1 - mean grey difference / 255, `different` the share of cells that differ by more
 than STRONG; "ATL empty" means the ATL content is almost one colour while Android's is not.
 """
@@ -12,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..capture import SHOTS, TREES
+from ..capture import SHOTS, TREES, Capture
 from ..errors import DoctorError
 from .shots import png_read, png_write, read_origin
 
@@ -42,6 +43,46 @@ def _origin(cap: Path, name: str, side: str) -> tuple[float, float] | None:
         except DoctorError:
             continue
     return None
+
+
+def _tree_bars(cap: Path, name: str) -> tuple[int | None, int | None]:
+    """(status bar, navigation bar) height in px from the first tree of the capture that has the bar."""
+    from .tree import load_tree
+
+    own = cap / TREES / f"{name}.xml"
+    top = bottom = None
+    for xml in [own] * own.is_file() + sorted((cap / TREES).glob("*.xml")):
+        try:
+            nodes = load_tree(xml, "android", normalize=False)
+        except DoctorError:
+            continue
+        for n in nodes:
+            if top is None and n.full_id == "android:id/statusBarBackground":
+                top = round(n.rect[3] - n.rect[1])
+            if bottom is None and n.full_id == "android:id/navigationBarBackground":
+                bottom = round(n.rect[3] - n.rect[1])
+        if top is not None and bottom is not None:
+            break
+    return top, bottom
+
+
+def _bars(cap: Path, name: str, density: float) -> tuple[float, float, str]:
+    """Height of the Android status and navigation bar in px, and where it comes from (`area` text)."""
+    top, bottom = _tree_bars(cap, name)
+    src = "tree"
+    if top is None or bottom is None:
+        try:
+            rec = Capture.open(cap).read_manifest().environment.get("insets", "")
+            t, b = (int(v) for v in rec.split(","))
+        except (DoctorError, ValueError):
+            t = b = None
+        if t is not None:
+            top, bottom, src = (t if top is None else top), (b if bottom is None else bottom), "recorded"
+    if top is None or bottom is None:
+        top = round(STATUS_BAR_DP * density) if top is None else top
+        bottom = round(NAV_BAR_DP * density) if bottom is None else bottom
+        src = "default dp"
+    return float(top), float(bottom), src
 
 
 def _cells(img: tuple[int, int, bytes], ox: float, oy: float, scale: float, cols: int, rows: int) -> list[float]:
@@ -90,9 +131,13 @@ def compare_shots(atl_dir: Path, android_dir: Path, density: float, out_dir: Pat
         sx, sy = read_origin(a_png)
         gx, gy = _origin(atl_dir, n, "atl") or (0.0, 0.0)
         ax, ay = sx + gx, sy + gy
-        bx, by = _origin(android_dir, n, "android") or (0.0, STATUS_BAR_DP * density)
+        sb, nb, src = _bars(android_dir, n, density)
+        bx, by = _origin(android_dir, n, "android") or (0.0, 0.0)
+        if by < sb:   # edge-to-edge: the status bar overlays the content's top, leave that band out on both sides
+            skip = -(-int((sb - by) / density * 1000) // (CELL_DP * 1000)) * CELL_DP
+            ay, by = ay + skip, by + skip * density
         w_dp = min(a[0] - ax, (b[0] - bx) / density)
-        h_dp = min(a[1] - ay, (b[1] - by) / density - NAV_BAR_DP)
+        h_dp = min(a[1] - ay, (b[1] - by - nb) / density)
         cols, nrows = int(w_dp // CELL_DP), int(h_dp // CELL_DP)
         if cols < 1 or nrows < 1:
             continue
@@ -101,7 +146,8 @@ def compare_shots(atl_dir: Path, android_dir: Path, density: float, out_dir: Pat
         empty = _stddev(ca) < EMPTY_STDDEV <= _stddev(cb)
         rows.append({"step": n, "similarity": round(1 - sum(d) / len(d) / 255, 3),
                      "different": round(sum(1 for x in d if x > STRONG) / len(d), 3),
-                     "finding": "ATL empty" if empty else ""})
+                     "finding": "ATL empty" if empty else "",
+                     "area": f"Android without status bar {sb:g} px and navigation bar {nb:g} px ({src})"})
         _diff_png(Path(out_dir) / f"{n}-diff.png", ca, cb, cols, nrows)
     rows.sort(key=lambda r: (r["similarity"], r["step"]))
     return rows

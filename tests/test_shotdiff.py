@@ -71,3 +71,54 @@ def test_atl_content_origin_is_where_gtk_put_it_not_the_java_rectangle(tmp_path)
     (a / "shots/x.origin").write_text("-23 -23\n")                     # the surface starts 23 px off screen
     _png(b / "shots/x.png", 200, 248, lambda x, y: _stripes(x, y))
     assert compare_shots(a, b, 1.0, tmp_path / "out")[0]["similarity"] > 0.97
+
+
+def _android_tree(path, bars):
+    node = '<node resource-id="%s" class="android.view.View" package="p" bounds="%s"/>'
+    inner = "".join(node % b for b in bars)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('<?xml version="1.0"?><hierarchy rotation="0"><node resource-id="android:id/content" '
+                    'class="android.widget.FrameLayout" package="p" bounds="[0,0][200,200]">' + inner +
+                    "</node></hierarchy>")
+
+
+def _bars_png(path):
+    """Android 200x200: red bars (24 px top, 40 px bottom) around the 200x136 stripe content."""
+    _png(path, 200, 200, lambda x, y: (255, 0, 0, 255) if y < 24 or y >= 160 else _stripes(x, y - 24))
+
+
+def test_system_bars_from_the_tree_are_not_compared(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    _png(a / "shots/s.png", 200, 136, _stripes)
+    _bars_png(b / "shots/s.png")
+    _android_tree(b / "trees/s.xml", [("android:id/statusBarBackground", "[0,0][200,24]"),
+                                      ("android:id/navigationBarBackground", "[0,160][200,200]")])
+    r = compare_shots(a, b, 1.0, tmp_path / "out")[0]
+    assert r["similarity"] > 0.97
+    assert "24" in r["area"] and "40" in r["area"] and "tree" in r["area"]
+
+
+def test_system_bars_from_the_recorded_insets(tmp_path):
+    import json
+    a, b = tmp_path / "a", tmp_path / "b"
+    _png(a / "shots/s.png", 200, 136, _stripes)
+    _bars_png(b / "shots/s.png")
+    (b / "manifest.json").write_text(json.dumps({"format": 1, "environment": {"insets": "24,40"}}))
+    r = compare_shots(a, b, 1.0, tmp_path / "out")[0]
+    assert r["similarity"] > 0.97 and "recorded" in r["area"]
+
+
+def test_without_any_bar_data_the_default_dp_is_used_and_said_so(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    _png(a / "shots/s.png", 200, 136, _stripes)
+    _png(b / "shots/s.png", 200, 200, _stripes)
+    assert "default" in compare_shots(a, b, 1.0, tmp_path / "out")[0]["area"]
+
+
+def test_parse_insets_from_dumpsys_window():
+    from atl_doctor.record_android import parse_insets
+    out = ("InsetsSource id=1 type=statusBars frame=[0,0][2000,36] visible=true\n"
+           "InsetsSource id=2 type=navigationBars frame=[0,1110][2000,1200] visible=true\n"
+           "InsetsSource id=3 type=ime frame=[0,0][0,0] visible=false\n")
+    assert parse_insets(out) == (36, 90)
+    assert parse_insets("nothing") is None

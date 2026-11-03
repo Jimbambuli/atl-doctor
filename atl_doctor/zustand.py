@@ -14,6 +14,8 @@ import argparse
 import os
 import shlex
 import shutil
+import sys
+import time
 from pathlib import Path
 
 from .errors import DoctorError, PrerequisiteMissing, UsageError
@@ -85,6 +87,7 @@ def _android_snapshot(action: str, package: str, name: str) -> str:
     tar = _data_home() / "atl-doctor/zustand/android" / package / f"{name}.tar"
     if action == "load" and tar.is_file():
         return _android_data("load", adb, package, tar)
+    before = _apps_kept(adb, package) if action == "load" else {}
     out = adb.out("emu", "avd", "snapshot", action, snap, timeout=300).strip()
     if action == "save" and not out.startswith("OK") and "skipped" in out:
         return _android_data("save", adb, package, tar)  # e.g. "Reason: UNSUPPORTED_VK_APP" (an app used Vulkan)
@@ -93,7 +96,65 @@ def _android_snapshot(action: str, package: str, name: str) -> str:
     tar.unlink(missing_ok=True)  # the snapshot is newer than an app-data copy of the same name
     if action == "load":
         adb.run("wait-for-device", timeout=120)
+        _reinstall_lost(adb, before)
     return snap
+
+
+def _third_party(adb) -> dict[str, int] | None:
+    """Installed third-party packages and their version codes; None while the package manager does not answer."""
+    r = adb.run("shell", "pm", "list", "packages", "-3", "--show-versioncode")
+    if r.returncode != 0:
+        return None
+    apps = {}
+    for line in r.stdout.decode("utf-8", "replace").splitlines():
+        f = dict(x.split(":", 1) for x in line.split() if ":" in x)
+        if f.get("package") and f.get("versionCode", "").isdigit():
+            apps[f["package"]] = int(f["versionCode"])
+    return apps
+
+
+def _apk_dir(package: str, version: int) -> Path:
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "atl-doctor/apks" / f"{package}-{version}"
+
+
+def _apps_kept(adb, package: str) -> dict[str, int]:
+    """Before an AVD snapshot load: copy the APKs of the other installed apps (once per version) so that the apps
+    the snapshot does not have can be installed again; a snapshot puts back the whole device of its time."""
+    kept = {}
+    for pkg, vc in (_third_party(adb) or {}).items():
+        d = _apk_dir(pkg, vc)
+        if pkg != package and not any(d.glob("*.apk")):
+            paths = [x[8:] for x in adb.shell("pm", "path", pkg).split() if x.startswith("package:")]
+            tmp = d.with_name(d.name + ".tmp")
+            shutil.rmtree(tmp, ignore_errors=True)
+            tmp.mkdir(parents=True)
+            if paths and all(adb.run("pull", p, str(tmp / f"{i}-{Path(p).name}"), timeout=300).returncode == 0
+                             for i, p in enumerate(paths)):
+                shutil.rmtree(d, ignore_errors=True)
+                tmp.rename(d)
+            else:
+                shutil.rmtree(tmp, ignore_errors=True)
+        if pkg != package and any(d.glob("*.apk")):
+            kept[pkg] = vc
+    return kept
+
+
+def _reinstall_lost(adb, before: dict[str, int]) -> None:
+    """Install the apps again that the loaded snapshot does not have (or only in an older version)."""
+    after = None
+    for _ in range(60):
+        after = _third_party(adb)
+        if after is not None:
+            break
+        time.sleep(1)
+    for pkg, vc in before.items():
+        if after is not None and after.get(pkg, -1) >= vc:
+            continue
+        apks = sorted(str(a) for a in _apk_dir(pkg, vc).glob("*.apk"))
+        r = adb.run("install-multiple" if len(apks) > 1 else "install", "-r", *apks, timeout=300)
+        ok = r.returncode == 0
+        print(f"atl-doctor: zustand: {pkg} {'installed again' if ok else 'NOT installed again'} "
+              f"(not in the loaded snapshot)", file=sys.stderr)
 
 
 DEVICE_TAR = "/data/local/tmp/atl-doctor-state.tar"

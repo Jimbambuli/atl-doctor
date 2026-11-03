@@ -86,3 +86,43 @@ def test_android_falls_back_to_the_app_data_when_the_emulator_refuses_a_snapshot
     assert not any(x.startswith("emu avd snapshot load") for x in c)
     assert any(x.startswith("push ") and x.endswith("/data/local/tmp/atl-doctor-state.tar") for x in c)
     assert any(x.startswith("shell") and "tar -C /data/data -xf /data/local/tmp/atl-doctor-state.tar" in x for x in c)
+
+
+class _Dev:
+    """A device whose installed apps change when a snapshot is loaded."""
+
+    def __init__(self, apps):
+        self.apps, self.calls = dict(apps), []
+
+    def run(self, *args, timeout=60):
+        import subprocess
+
+        self.calls.append(" ".join(args))
+        out = b""
+        if args[:4] == ("shell", "pm", "list", "packages"):
+            out = "".join(f"package:{p} versionCode:{v}\n" for p, v in self.apps.items()).encode()
+        elif args[0] == "pull":
+            Path(args[2]).write_bytes(b"APK")
+        elif args[0] == "install":
+            self.apps[args[-1].split("/")[-2].rsplit("-", 1)[0]] = int(args[-1].split("/")[-2].rsplit("-", 1)[1])
+        return subprocess.CompletedProcess(args, 0, out, b"")
+
+    def shell(self, *args, timeout=60):
+        return "package:/data/app/x/base.apk\n" if args[:2] == ("pm", "path") else ""
+
+
+def test_android_snapshot_load_keeps_the_other_apps(home, monkeypatch, capsys):
+    from atl_doctor import zustand
+
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    dev = _Dev({PKG: 1, "com.aurora.store": 76, "org.other": 5})
+    before = zustand._apps_kept(dev, PKG)
+    assert before == {"com.aurora.store": 76, "org.other": 5}  # not the app the state belongs to
+    dev.apps = {PKG: 1, "org.other": 5}  # the snapshot is older than the Aurora installation
+    zustand._reinstall_lost(dev, before)
+    assert dev.apps["com.aurora.store"] == 76
+    assert not any(c.startswith("install") and "org.other" in c for c in dev.calls)
+    assert "com.aurora.store installed again" in capsys.readouterr().err
+    n = len([c for c in dev.calls if c.startswith("pull")])
+    zustand._apps_kept(dev, PKG)  # the APKs are pulled once per version
+    assert len([c for c in dev.calls if c.startswith("pull")]) == n

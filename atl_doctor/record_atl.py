@@ -307,6 +307,10 @@ def record_atl(opts: RecordOptions) -> int:
     _warn(f"recording into {out}")
 
     plugin = jvmti_plugin(opts.prefix)
+    art = plugin.parent / "libart.so" if plugin else None
+    if art and art.is_file() and plugin.stat().st_mtime < art.stat().st_mtime:
+        # art_standalone's make does not build the plugin: an old copy compiled against another libart misbehaves
+        _warn(f"{plugin} is older than {art.name}: rebuild it (tools/build-jvmti-plugin.sh) if ART changed")
     agent = find_helper(AGENT_LIB, opts.agent, opts.prefix)
     probes = probe_all(opts.prefix, opts.atl_src, False, None)
     for i, p in enumerate(probes):

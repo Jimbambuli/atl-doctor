@@ -292,6 +292,13 @@ static void check_class(JNIEnv *jni, jclass k) {
 	for (jint i = 0; i < mn; i++) {
 		jint mod = 0; (*J)->GetMethodModifiers(J, ms[i], &mod);
 		if (mod & (0x0400 /*abstract*/ | 0x0100 /*native*/ | 0x0008 /*static*/)) continue;
+		/* ART lists the default methods a class inherits (Window$Callback.onPointerCaptureChanged) among its own;
+		   a breakpoint there deoptimizes every method (see above): only methods the class declares itself */
+		jclass dk = NULL;
+		if ((*J)->GetMethodDeclaringClass(J, ms[i], &dk) != JVMTI_ERROR_NONE || !dk) continue;
+		jboolean own = (*jni)->IsSameObject(jni, dk, k);
+		(*jni)->DeleteLocalRef(jni, dk);
+		if (!own) continue;
 		struct mc *e = method(ms[i]);
 		if (!e) continue;
 		uint8_t mg = 0;

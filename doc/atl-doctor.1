@@ -326,6 +326,7 @@ One command per line or separated by semicolons; \fB#\fR starts a comment outsid
 .nf
 wait\-window "Title" [TIMEOUT]
 click "Text" | click id/NAME | click X,Y     (dp, relative to android:id/content)
+click X,Y android=X,Y (on Android the second point: a target laid out elsewhere there)
 key NAME[+NAME]       type "text"       scroll N       scroll\-smooth DY
 wait SECONDS          wait\-idle [TIMEOUT]
 mark ["name"]         screenshot "name"

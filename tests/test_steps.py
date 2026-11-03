@@ -292,3 +292,23 @@ def test_start_state_line_is_no_step_and_keeps_line_numbers():
 def test_start_state_only_before_the_first_step():
     with pytest.raises(StepError, match="s:2: start_zustand"):
         parse_steps("wait 1\nstart_zustand: x\n", "s")
+
+
+def test_click_with_android_coordinates():
+    from atl_doctor.steps import AndroidDriver, parse_steps, run_steps
+
+    (s,) = parse_steps("click 1289,676 android=1289,612\n", "t")
+    assert s.args == ("xy", 1289.0, 676.0, 1289.0, 612.0)
+    with pytest.raises(StepError):
+        parse_steps("click 1,2 3,4\n", "t")
+
+    class A(AndroidDriver):
+        def __init__(self):
+            self.has_tree, self.clicks = False, []
+
+        def click(self, x, y):
+            self.clicks.append((x, y))
+
+    a = A()
+    run_steps([s], a, "t", io.StringIO())
+    assert a.clicks == [(1289.0, 612.0)]

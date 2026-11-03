@@ -123,15 +123,19 @@ def _command(name: _Tok, args: list[_Tok], filename: str) -> Step:
             raise err(f"{cmd}: too many arguments")
 
     if cmd == "click":
-        limit(1)
+        limit(2)
         a = args[0] if args else None
         if a and a.kind == "str":
             return Step(line, cmd, ("text", a.value))
         if a and a.value.startswith("id/") and len(a.value) > 3:
             return Step(line, cmd, ("id", a.value))
         m = _XY.match(a.value) if a else None
-        if m:
-            return Step(line, cmd, ("xy", float(m.group(1)), float(m.group(2))))
+        o = _XY.match(args[1].value[8:]) if len(args) > 1 and args[1].value.startswith("android=") else None
+        if m and (len(args) == 1 or o):  # android=X,Y: the same target where Android lays it out elsewhere
+            other = (float(o.group(1)), float(o.group(2))) if o else ()
+            return Step(line, cmd, ("xy", float(m.group(1)), float(m.group(2)), *other))
+        if len(args) > 1:
+            raise err("click: only X,Y takes a second argument (android=X,Y)")
         raise err('click expects "Text", id/NAME or X,Y')
     if cmd == "wait-window":
         limit(2)
@@ -363,7 +367,8 @@ def _run_one(s: Step, d: Driver, filename: str) -> None:
     a = s.args
     if s.cmd == "click":
         if a[0] == "xy":
-            d.click(float(a[1]), float(a[2]))
+            k = 3 if len(a) > 3 and isinstance(d, AndroidDriver) else 1
+            d.click(float(a[k]), float(a[k + 1]))
             return
         if not d.has_tree:
             raise fail(f"click by {'text' if a[0] == 'text' else 'id'} needs a view tree (ATLViewDump/uiautomator)")

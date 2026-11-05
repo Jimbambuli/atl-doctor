@@ -540,6 +540,10 @@ def build_pair_report(atl_dir: Path, android_dir: Path, density: float | None,
 
 
 def _report_capture(args: argparse.Namespace) -> int:
+    from .archive import is_archive
+
+    if args.dirs and is_archive(Path(args.dirs[0])):
+        return _report_archive(args)
     if len(args.dirs) > 2:
         raise UsageError("report takes at most two capture directories (ATL and Android)")
     if len(args.dirs) == 2:
@@ -548,6 +552,35 @@ def _report_capture(args: argparse.Namespace) -> int:
         r, root = build_capture_report(Path(args.dirs[0]), args.jank_min_frames)
     apply_capture_aosp(r, root, args.aosp, args.no_aosp_fetch)
     return _emit(args, r, root)
+
+
+def _report_archive(args: argparse.Namespace) -> int:
+    """Report each capture of an APK Starter archive; with several, -o names a directory (one file per capture)."""
+    import tempfile
+
+    from .archive import unpack
+
+    with tempfile.TemporaryDirectory(prefix="atl-doctor-") as tmp:
+        caps = unpack(Path(args.dirs[0]), Path(tmp))
+        if len(caps) == 1:
+            args.dirs = [str(caps[0]), *args.dirs[1:]]
+            return _report_capture(args)
+        if len(args.dirs) > 1:
+            raise UsageError("an archive with several captures takes no Android capture directory")
+        out = Path(args.output) if args.output else None
+        if out:
+            out.mkdir(parents=True, exist_ok=True)
+        if args.format == "html" and not out:
+            raise UsageError("-f html needs -o DIR for an archive with several captures")
+        rc = 0
+        for cap in caps:
+            r, root = build_capture_report(cap, args.jank_min_frames)
+            apply_capture_aosp(r, root, args.aosp, args.no_aosp_fetch)
+            args.output = str(out / f"{cap.name}.{args.format if args.format != 'text' else 'txt'}") if out else None
+            if not out:
+                sys.stdout.write(f"== {cap.name}\n")
+            rc = max(rc, _emit(args, r, root))
+        return rc
 
 
 def render_explain(f: Finding, r: Report, capture_dir: Path | None) -> str:
@@ -646,7 +679,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--jank-min-frames", type=_positive_int, default=JANK_MIN_FRAMES, metavar="N",
                    help=f"fewest frames a phase needs for a jank finding (default {JANK_MIN_FRAMES}); fewer is noted, "
                         "not reported")
-    p.add_argument("dirs", nargs="*", metavar="DIR", help="capture directory [and Android capture directory]")
+    p.add_argument("dirs", nargs="*", metavar="DIR", help="capture directory or APK Starter archive (.tar.gz) [and Android capture directory]")
     p.set_defaults(func=_run_report)
 
     e = sub.add_parser("explain", help="show everything known about one finding", parents=[common_parser()])

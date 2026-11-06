@@ -92,6 +92,7 @@ class FakeDriver:
     def screenshot(self, name): self.calls.append(("screenshot", name))
     def wait_idle(self, t): self.calls.append(("wait-idle", t)); return True
     def wait_window(self, m, t): self.calls.append(("wait-window", m, t)); return m != "never"
+    def close_window(self): self.calls.append(("close-window",))
     def mark(self, name): self.calls.append(("mark", name))
 
 
@@ -350,3 +351,9 @@ def test_android_click_is_relative_to_the_content_like_on_atl(tmp_path):
     taps = [c for c in calls if c[:2] == ("shell", "input")]
     assert taps == [("shell", "input", "tap", "26", "116")] * 2
     assert sum(1 for c in calls if c[0] == "pull") == 1
+
+
+def test_close_window_parses_without_args():
+    assert [x.cmd for x in parse_steps("close-window", "s")] == ["close-window"]
+    with pytest.raises(Exception):
+        parse_steps("close-window now", "s")

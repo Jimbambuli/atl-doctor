@@ -2,7 +2,7 @@
 """Step files (`record --steps FILE`): parse and run them against a driver (ATL or Android).
 
 One command per line or separated by ';', '#' starts a comment outside quotes:
-    wait-window "Title" [TIMEOUT]   click "Text" | click id/NAME | click X,Y (dp)   key NAME[+NAME]
+    wait-window "Title" [TIMEOUT]   close-window   click "Text" | click id/NAME | click X,Y (dp)   key NAME[+NAME]
     type "text"   scroll N   scroll-smooth DY   wait SECONDS   wait-idle [TIMEOUT]   mark ["name"]   screenshot "name"
     repeat N { ... }   (also over several lines, nested)
 A scenario may begin with `start_zustand: NAME`: the app's state saved with `atl-doctor zustand sichern` is loaded
@@ -167,6 +167,9 @@ def _command(name: _Tok, args: list[_Tok], filename: str) -> Step:
         if not v:
             raise err(f"{cmd} expects {'a key name' if cmd == 'key' else 'a text' if cmd == 'type' else 'a name'}")
         return Step(line, cmd, (v,))
+    if cmd == "close-window":
+        limit(0)
+        return Step(line, cmd, ())
     if cmd == "mark":
         limit(1)
         return Step(line, cmd, (text_arg(0) or "",))
@@ -251,6 +254,7 @@ class Driver(Protocol):
     def screenshot(self, name: str) -> None: ...
     def wait_idle(self, timeout_s: float) -> bool: ...
     def wait_window(self, match: str, timeout_s: float) -> bool: ...  # may set event_us: when the window appeared
+    def close_window(self) -> None: ...
     def mark(self, name: str) -> None: ...
 
 
@@ -392,6 +396,8 @@ def _run_one(s: Step, d: Driver, filename: str) -> None:
     elif s.cmd == "wait-window":
         if not d.wait_window(str(a[0]), float(a[1])):
             raise fail(f"no window matching '{a[0]}' within {_fmt_s(float(a[1]))} s")
+    elif s.cmd == "close-window":
+        d.close_window()
     elif s.cmd == "mark":
         d.mark(str(a[0]))
     elif s.cmd == "screenshot":
@@ -559,6 +565,10 @@ class AtlDriver:
         w = self._main_window()
         x, y, ww, hh = w["rect"] if w else (0.0, 0.0, 0.0, 0.0)
         return round(x + ww / 2), round(y + hh / 2)
+
+    def close_window(self) -> None:
+        """Close the main window like the window manager's close button (close request to the app)."""
+        self.session._script("for (const w of workspace.stackingOrder) if (w.normalWindow) { w.closeWindow(); break; }")
 
     def scroll(self, n: int) -> None:
         """N real wheel notches (the helper marks them; the preload shim in the app makes them source wheel)."""
@@ -780,6 +790,9 @@ class AndroidDriver:
                 return True
             time.sleep(0.2)
         return False
+
+    def close_window(self) -> None:
+        self._adb("shell", "input", "keyevent", "KEYCODE_BACK")
 
     def wait_window(self, match: str, timeout_s: float) -> bool:
         end = time.monotonic() + timeout_s

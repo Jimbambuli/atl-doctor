@@ -105,6 +105,7 @@ def scan_apk(apk: ApkInfo, state: AtlState, sdk_int: int | None) -> tuple[AppCov
     found: dict[str, Finding] = {}
     counts: Counter[str] = Counter()
     java_missing = 0
+    family: dict[str, set[str]] = {}  # class -> every member the app references that ATL lacks
 
     def add(f: Finding) -> None:
         found.setdefault(f.id, f)
@@ -131,11 +132,18 @@ def scan_apk(apk: ApkInfo, state: AtlState, sdk_int: int | None) -> tuple[AppCov
             add(stub_finding(decl, name, state.stubs, (decl, name) in used or (r.cls, name) in used, list(occ), []))
         elif status == "missing-member":
             cls = rated[0]
+            family.setdefault(cls, set()).add(r.member)
             add(Finding("missing", f"{cls}#{name}", Klass.MISSING, f"missing member {cls}#{r.member}",
                         f"Implement {cls}.{name} in ATL (src/api-impl).", list(occ)))
         elif status == "missing-class":
             missing_class(rated[0])
 
+    for f in found.values():  # the whole family: the other members of this class that the app uses and ATL lacks
+        if f.kind == "missing" and "#" in f.key:
+            cls, name = f.key.split("#", 1)
+            rest = sorted(m for m in family.get(cls, ()) if m.split("(")[0].split(":")[0] != name)
+            if rest:
+                f.details["also_missing_in_class"] = rest
     total = counts["impl"] + counts["stub"] + counts["missing-member"] + counts["missing-class"]
     gms = len({r.cls for r in refs if r.cls.startswith(GMS_PREFIXES)})
     compose = sum(1 for c in apk.app_classes() if c.startswith("Landroidx/compose/ui/"))

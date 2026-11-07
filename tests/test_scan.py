@@ -202,3 +202,23 @@ def test_report_with_damaged_dex_notes_it_in_environment(tmp_path, capsys):
     (cap.root / "trace/stubs.tsv").write_text("\t".join(_TSV_HEAD) + "\n")
     assert main(["report", str(cap.root)]) == 0
     assert "unreadable, stub results not checked" in capsys.readouterr().out
+
+
+def test_missing_member_lists_the_rest_of_its_class(state, tmp_path):
+    t = "Landroid/media/ThumbnailUtils;->"
+    p = apk(tmp_path, "fam.apk", [t + "createImageThumbnail(Ljava/io/File;)Landroid/graphics/Bitmap;", t + "otherGap(I)I",
+                                  t + "realMethod(I)I", "View.setAlpha"])
+    _, fs = scan_apk(read_apk(p), state, None)
+    by = {f.id: f for f in fs}
+    a = by["missing:android.media.ThumbnailUtils#createImageThumbnail"]
+    b = by["missing:android.media.ThumbnailUtils#otherGap"]
+    assert a.details["also_missing_in_class"] == ["otherGap(I)I"]
+    assert b.details["also_missing_in_class"] == ["createImageThumbnail(Ljava/io/File;)Landroid/graphics/Bitmap;"]
+    from atl_doctor.report import finding_lines
+    assert "    also missing in this class: otherGap(I)I" in finding_lines(a)
+
+
+def test_single_missing_member_has_no_family(state, tmp_path):
+    p = apk(tmp_path, "one.apk", ["ThumbnailUtils.createImageThumbnail"])
+    _, fs = scan_apk(read_apk(p), state, None)
+    assert all("also_missing_in_class" not in f.details for f in fs)

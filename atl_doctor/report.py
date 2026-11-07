@@ -59,6 +59,9 @@ def finding_lines(f: Finding) -> list[str]:
     lines = [f"{f.short_id}  {f.weight:>3}  {f.title}  [{f.total_count}x, first: {first}]"]
     if f.suggestion:
         lines.append(f"    -> {f.suggestion}")
+    also = f.details.get("also_missing_in_class")
+    if also:
+        lines.append("    also missing in this class: " + ", ".join(also))
     from .sources.aosp import aosp_line
 
     a = aosp_line(f)

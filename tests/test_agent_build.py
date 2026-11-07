@@ -113,3 +113,32 @@ def test_agent_exception_line_with_very_long_method_names(built, tmp_path):
     e = [ln for ln in lines if ln.startswith("E\t") and "IllegalStateException" in ln]
     assert len(e) == 2 and all(len(ln) < 16384 for ln in e)
     assert all(ln[0] in "EILCHMGP" and ln[1] == "\t" for ln in lines)
+
+
+def test_agent_exit_lines_on_host_jvm(built, tmp_path):
+    """X line for System.exit with status, thread and app frame; R lines for the exceptions before it."""
+    import subprocess
+    java, javac = shutil.which("java"), shutil.which("javac")
+    if not java or not javac:
+        pytest.skip("no JDK")
+    (tmp_path / "Main.java").write_text(
+        "public class Main {\n"
+        "  static void quit(int s) { System.exit(s); }\n"
+        "  public static void main(String[] a) throws Exception {\n"
+        "    for (int i = 0; i < 7; i++) { try { throw new IllegalStateException(\"n\" + i); } catch (IllegalStateException e) {} }\n"
+        "    Thread t = new Thread(() -> quit(7), \"quitter\"); t.start(); t.join(); } }\n")
+    subprocess.run([javac, "-d", str(tmp_path), str(tmp_path / "Main.java")], check=True, capture_output=True)
+    out = tmp_path / "agent.tsv"
+    r = subprocess.run(["nice", "-n", "19", java, "-cp", str(tmp_path),
+                        f"-agentpath:{built / 'libatl_doctor_agent.so'}={out},nolc", "Main"],
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 7, r.stderr
+    from atl_doctor.sources.exceptions import parse_agent
+    ev = parse_agent(out)
+    assert any(e.tag == "I" and e.fields[0] == "exit hooks 3" for e in ev)
+    xs = [e for e in ev if e.tag == "X"]
+    assert xs[0].fields[:3] == ["System.exit", "7", "quitter"]
+    frames = xs[0].fields[3].split("|")
+    assert frames[0].endswith("java.lang.System.exit") and any(f == "Main.quit" for f in frames)
+    rs = [e for e in ev if e.tag == "R"]
+    assert len(rs) == 5 and all(e.fields[0] == "java.lang.IllegalStateException" and e.fields[1] == "main" for e in rs)

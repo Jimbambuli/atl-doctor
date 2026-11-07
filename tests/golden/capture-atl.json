@@ -80,6 +80,37 @@
       }
     },
     {
+      "class": "crash",
+      "count": 1,
+      "details": {
+        "exit_hooks": null,
+        "process_exit_status": null,
+        "process_signal": "SIGSEGV"
+      },
+      "id": "exit:cause:none",
+      "key": "cause:none",
+      "kind": "exit",
+      "occurrences": [
+        {
+          "count": 1,
+          "phase": "Import",
+          "phase_index": 1,
+          "side": "atl",
+          "where": "agent"
+        }
+      ],
+      "on_android": false,
+      "short_id": "df514dc0",
+      "suggestion": "The process ended in another way (native exit, signal, crash of the runtime); see the crash findings and the log.",
+      "title": "Ende ohne System.exit/Runtime.exit erfasst (Exit-Hooks des Agenten: ohne Angabe)",
+      "weight": 60,
+      "weight_explained": {
+        "android_penalty": 0,
+        "class": "crash",
+        "rank": 60
+      }
+    },
+    {
       "class": "other",
       "count": 1,
       "details": {

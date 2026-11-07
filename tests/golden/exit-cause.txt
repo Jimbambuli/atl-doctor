@@ -1,0 +1,49 @@
+Environment
+  mode: record
+  phases: start, Import
+  package: org.example.demo
+  version_name: 1.0
+  apk: demo.apk
+  started: 2026-11-01T10:00:00+00:00
+  ended: 2026-11-01T10:01:00+00:00
+  exit: 10
+
+Fix first
+  53ac4e33   60  fatal signal SIGSEGV  [1x, first: start]
+      -> Fix the crash first; later findings may be consequences.
+  f60db87a   60  exit status 10  [1x, first: Import]
+      -> Fix the crash first; later findings may be consequences.
+  d8aec814   60  System.exit(10) called from org.example.demo.Quit.now on thread worker-1  [1x, first: Import]
+      -> The app ended itself here; start at the app frame and the exceptions before it.
+      stack:
+        java.lang.System.exit
+        org.example.demo.Quit.now
+        org.example.demo.Main$N.run
+        android.os.Handler.dispatchMessage
+      last exceptions before it:
+        java.lang.NullPointerException on main, caught, first app frame org.example.demo.Main.onCreate
+        java.lang.IllegalStateException on ImportTask, uncaught, first app frame org.example.demo.ImportTask.run
+      process: exit 10
+
+Exceptions
+  only ATL
+    286e960d    0  java.lang.NullPointerException: Attempt to read field X on null  [1x, first: start]
+
+Crashes
+  53ac4e33   60  fatal signal SIGSEGV  [1x, first: start]
+      -> Fix the crash first; later findings may be consequences.
+  f60db87a   60  exit status 10  [1x, first: Import]
+      -> Fix the crash first; later findings may be consequences.
+
+Exit cause
+  d8aec814   60  System.exit(10) called from org.example.demo.Quit.now on thread worker-1  [1x, first: Import]
+      -> The app ended itself here; start at the app frame and the exceptions before it.
+      stack:
+        java.lang.System.exit
+        org.example.demo.Quit.now
+        org.example.demo.Main$N.run
+        android.os.Handler.dispatchMessage
+      last exceptions before it:
+        java.lang.NullPointerException on main, caught, first app frame org.example.demo.Main.onCreate
+        java.lang.IllegalStateException on ImportTask, uncaught, first app frame org.example.demo.ImportTask.run
+      process: exit 10

@@ -84,10 +84,11 @@ def test_aborted_recording_and_exit_code(tmp_path):
     m.ended, m.exit_status = "2026-11-01T10:00:00+00:00", 3
     c.write_manifest(m)
     _, fs = load_capture_findings(c, None, set())
-    assert {f.id for f in fs} == {"crash:exit:3"}
+    assert {f.id for f in fs} == {"crash:exit:3", "exit:cause:none"}
     m.exit_status = 0
     c.write_manifest(m)
-    assert load_capture_findings(c, None, set()) == (["start"], [])
+    phases, fs = load_capture_findings(c, None, set())
+    assert phases == ["start"] and [f.id for f in fs] == ["exit:cause:none"] and fs[0].klass is Klass.OTHER
 
 
 def test_agent_runtime_problems_reach_the_environment(tmp_path, capsys):

@@ -42,6 +42,7 @@ SECTIONS: list[tuple[str, Callable[[Finding], bool]]] = [
     ("Missing methods/classes", _kind_in("missing")),
     ("Exceptions", _kind_in("exc")),
     ("Crashes", _kind_in("crash")),
+    ("Exit cause", _kind_in("exit")),
     ("View tree differences", _kind_in("tree")),
     ("Lifecycle differences", _kind_in("lc")),
     ("Jank and hangs", _kind_in("jank", "hang", "gc")),
@@ -59,6 +60,18 @@ def finding_lines(f: Finding) -> list[str]:
     lines = [f"{f.short_id}  {f.weight:>3}  {f.title}  [{f.total_count}x, first: {first}]"]
     if f.suggestion:
         lines.append(f"    -> {f.suggestion}")
+    if f.kind == "exit":
+        d = f.details
+        if d.get("stack"):
+            lines += ["    stack:"] + [f"      {fr}" for fr in d["stack"]]
+        if d.get("recent_exceptions"):
+            lines.append("    last exceptions before it:")
+            lines += [f"      {x['type']} on {x['thread']}, {'uncaught' if x['uncaught'] else 'caught'}"
+                      f"{', first app frame ' + x['app_frame'] if x['app_frame'] else ''}" for x in d["recent_exceptions"]]
+        if d.get("process_exit_status") is not None or d.get("process_signal"):
+            lines.append("    process: " + ", ".join(
+                x for x in (f"exit {d['process_exit_status']}" if d.get("process_exit_status") is not None else "",
+                            f"signal {d['process_signal']}" if d.get("process_signal") else "") if x))
     also = f.details.get("also_missing_in_class")
     if also:
         lines.append("    also missing in this class: " + ", ".join(also))

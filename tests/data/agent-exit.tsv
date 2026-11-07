@@ -1,0 +1,8 @@
+I	1000100	42	loaded
+I	1000110	42	exit hooks 3
+E	1000400	42	java.lang.NullPointerException	Attempt to read field 0x1f on null	org.example.demo.Main.onCreate	B:android.graphics.drawable.Drawable.inflate|org.example.demo.Main.onCreate
+X	3000100	44	System.exit	10	worker-1	B:java.lang.System.exit|org.example.demo.Quit.now|org.example.demo.Main$1.run|B:android.os.Handler.dispatchMessage
+R	1000400	42	java.lang.NullPointerException	main	org.example.demo.Main.onCreate	org.example.demo.Main.onCreate
+R	2000200	43	java.lang.IllegalStateException	ImportTask	UNCAUGHT	org.example.demo.ImportTask.run
+X	3000200	44	Runtime.exit	10	worker-1	B:java.lang.Runtime.exit|B:java.lang.System.exit|org.example.demo.Quit.now
+X	3000300	44	Runtime.halt	10	worker-1	B:java.lang.Runtime.halt|B:java.lang.Runtime.exit

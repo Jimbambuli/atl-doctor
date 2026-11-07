@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..capture import AGENT, ATL_LOG, STUB_HITS, TRACE_DIR, Capture
 from ..findings import Finding, Klass, Occurrence, merge
-from .exceptions import exception_findings, parse_agent
+from .exceptions import exception_findings, exit_findings, parse_agent
 from .log import SUGGEST_CRASH, parse_log_text
 from .memory import memory_findings
 from .perf import JANK_MIN_FRAMES, atl_frame_intervals, perf_findings
@@ -51,6 +51,8 @@ def load_capture_findings(cap: Capture, entries: list[StubEntry] | None,
     elif m.exit_status:
         found.append(Finding("crash", f"exit:{m.exit_status}", Klass.CRASH, f"exit status {m.exit_status}",
                              SUGGEST_CRASH, list(end)))
+    if m.side == "atl" and m.ended is not None:
+        found += exit_findings(events, m.exit_status, m.signal, marks, m.side)
     if m.ended is None:
         found.append(Finding("crash", "aborted-recording", Klass.OTHER, "recording did not finish cleanly",
                              "The recording was interrupted; data up to that point is shown.", list(end)))

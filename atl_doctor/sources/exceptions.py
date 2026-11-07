@@ -11,8 +11,8 @@ from ..findings import Finding, Klass, Occurrence, normalize_text
 from .log import SUGGEST_CRASH, is_platform_frame
 
 # columns per line tag, including tag and time; tags in WITH_TID have the thread id as third column
-COLUMNS = {"E": 7, "L": 9, "I": 4, "P": 5, "G": 3, "H": 5, "M": 6, "C": 6}
-WITH_TID = {"E", "L", "I", "H"}
+COLUMNS = {"E": 7, "L": 9, "I": 4, "P": 5, "G": 3, "H": 5, "M": 6, "C": 6, "X": 7, "R": 7}
+WITH_TID = {"E", "L", "I", "H", "X", "R"}
 
 
 @dataclass
@@ -48,7 +48,7 @@ def parse_agent_lines(lines: list[str]) -> list[AgentEvent]:
 
 # I lines that mean a probe of the agent did not work (the others are progress notes)
 AGENT_PROBLEMS = ("late: attach failed", "late: cannot load plugin", "no JVMTI environment", "AddCapabilities failed",
-                  "SetBreakpoint failed", "unknown option", "frames unavailable", "hang: no thread named main",
+                  "SetBreakpoint failed", "exit hook: method not found", "unknown option", "frames unavailable", "hang: no thread named main",
                   "heap: cannot tag objects", "heap: class counting failed", "gc pauses unavailable", "skipped ")
 
 
@@ -88,6 +88,55 @@ def exception_findings(events: list[AgentEvent], marks: list[Mark], side: str) -
         f.occurrences = [Occurrence(name, i, side, n, f.details["app_frame"])
                          for (i, name), n in sorted(counts[fid].items())]
     return list(found.values())
+
+
+EXIT_NONE = "Ende ohne System.exit/Runtime.exit erfasst"
+EXIT_HOOKS = 3  # breakpoints the agent sets: System.exit, Runtime.exit, Runtime.halt
+
+
+def _exit_hooks(events: list[AgentEvent]) -> int | None:
+    """Number of exit breakpoints the agent says it set (I line "exit hooks N"), None if it said nothing."""
+    n = [int(e.fields[0].split()[2]) for e in events
+         if e.tag == "I" and e.fields[0].startswith("exit hooks ") and e.fields[0].split()[2:3][:1] and e.fields[0].split()[2].isdigit()]
+    return n[-1] if n else None
+
+
+def exit_findings(events: list[AgentEvent], status: int | None, signal: str | None, marks: list[Mark], side: str) -> list[Finding]:
+    """Why did the process end: the first System.exit/Runtime.exit/Runtime.halt call the agent saw (X lines, with
+    the last exceptions before it, R lines), else the statement that none was seen."""
+    hooks = _exit_hooks(events)
+    last = marks[-1] if marks else None
+    where = [Occurrence(last.name, last.index, side, 1, "agent")] if last else []
+    xs = [i for i, e in enumerate(events) if e.tag == "X"]
+    end: dict = {"process_exit_status": status, "process_signal": signal, "exit_hooks": hooks}
+    if not xs:
+        title = EXIT_NONE
+        if hooks != EXIT_HOOKS:
+            title += f" (Exit-Hooks des Agenten: {'ohne Angabe' if hooks is None else f'{hooks} von {EXIT_HOOKS}'})"
+        klass = Klass.CRASH if (signal or status) else Klass.OTHER
+        return [Finding("exit", "cause:none", klass, title,
+                        "The process ended in another way (native exit, signal, crash of the runtime); see the crash findings "
+                        "and the log." if klass is Klass.CRASH else "", where, end)]
+    first = events[xs[0]]
+    kind, st, thread, frames = first.fields
+    stack = [_frame(f) for f in frames.split("|") if f]
+    app_frame = next((f for f in stack if not is_platform_frame(f)), "")
+    chain = [events[i].fields[0] for i in xs]
+    recent = []
+    for e in events[xs[0] + 1:]:
+        if e.tag != "R":
+            break
+        etype, ethread, catcher, app = e.fields
+        recent.append({"type": etype, "thread": ethread, "tid": e.tid, "t_us": e.t_us,
+                       "catcher": "" if catcher == "UNCAUGHT" else _frame(catcher), "uncaught": catcher == "UNCAUGHT",
+                       "app_frame": "" if app == "-" else _frame(app)})
+    end.update({"call": kind, "status": st, "thread": thread, "tid": first.tid, "app_frame": app_frame, "stack": stack,
+                "chain": chain, "recent_exceptions": recent})
+    nonzero = st != "0" and (st != "?" or bool(status or signal))
+    title = f"{kind}({st}) called" + (f" from {app_frame}" if app_frame else " (no app frame in the stack)") + f" on thread {thread}"
+    return [Finding("exit", f"cause:{kind}:{st}@{app_frame}", Klass.CRASH if nonzero else Klass.OTHER, title,
+                    "The app ended itself here; start at the app frame and the exceptions before it." if nonzero else "",
+                    where, end)]
 
 
 def lifecycle_sequence(events: list[AgentEvent], marks: list[Mark]) -> dict[int, list[str]]:

@@ -62,6 +62,11 @@ $ATL_DOCTOR_AOSP_URL replaces the repository URL (a mirror). Without network and
 \fB\-\-no\-aosp\-fetch\fR, the report says "AOSP comparison not possible" in its environment section and the stub hits
 stay unfiltered; nothing is dropped silently.
 .PP
+The agent sets breakpoints in System.exit, Runtime.exit and Runtime.halt (agent option \fBnoexit\fR turns that off).
+The report's \fBExit cause\fR section then names the first call: the exit status, the calling app frame, the thread,
+the stack and the last five exceptions before it. If the process ended without such a call, the finding says
+"Ende ohne System.exit/Runtime.exit erfasst" and gives the process's exit status or signal.
+.PP
 Results go to standard output, messages to standard error.
 The tool never asks questions and never opens a browser.
 If an optional probe is missing, one line on standard error says so and the recording goes on without it;

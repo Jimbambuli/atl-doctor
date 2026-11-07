@@ -11,6 +11,7 @@
  *   or late=PLUGIN (see below).
  *   opt: noex          no exceptions
  *        nolc          no lifecycle
+ *        noexit        no exit hooks (breakpoints in System.exit, Runtime.exit, Runtime.halt)
  *        arm=FILE      set the lifecycle breakpoints only once FILE exists (breakpoints right at start make some
  *                      apps lose start-up races; exceptions are recorded from the start anyway)
  *        late=PLUGIN   load the JVMTI plugin itself latesec seconds after start (like Android's attach-agent): the
@@ -43,6 +44,13 @@
  *   M  t mark_index java_used_bytes java_total_bytes jni_globals   at every new line of marks=FILE
  *        (Runtime.totalMemory()-freeMemory(); jni_globals only with heap, else -1)
  *   C  t mark_index class instances bytes   with heap: the 50 classes with the most bytes at that mark
+ *   X  t tid kind status thread frame0|frame1|...   process end asked for in Java code: kind = System.exit,
+ *        Runtime.exit or Runtime.halt (frame 0 is that method; 40 frames, "B:" = boot class); status = the int
+ *        argument, "?" if ART refused to read it. A chain (System.exit -> Runtime.exit -> Runtime.halt) gives
+ *        one X line per method; there is no X line if the process ended in another way (native exit, signal)
+ *   R  t tid type thread catcher|UNCAUGHT first_app_frame|-   written right after the first X line: the last
+ *        5 exceptions before it (oldest first), t = when thrown, first_app_frame = first frame outside the boot classes
+ *   I line "exit hooks 3" says the three breakpoints are set
  */
 #define _GNU_SOURCE
 #include <jvmti.h>
@@ -60,7 +68,7 @@
 
 static jvmtiEnv *J;
 static int32_t out_fd = -1;
-static uint8_t opt_ex = 1, opt_lc = 1;
+static uint8_t opt_ex = 1, opt_lc = 1, opt_exit = 1;
 static volatile uint8_t lc_active;
 static char opt_arm[512], opt_late[512], opt_marks[512];
 static uint32_t opt_latesec = 20;
@@ -150,6 +158,14 @@ static void class_name(jclass k, char *o, size_t on) {
 
 /* ---------- exceptions ---------- */
 static jmethodID mid_getMessage;
+
+/* the last exceptions, for the X/R lines at the end of the process */
+#define RING_N 5
+struct ring_exc { int64_t t; int32_t tid; char type[160], thread[80], catcher[200], app[240]; };
+static struct ring_exc ring[RING_N];
+static uint32_t ring_count;   /* exceptions seen in all; slot = count % RING_N */
+static pthread_mutex_t ring_lock = PTHREAD_MUTEX_INITIALIZER;
+
 static void JNICALL cb_exception(jvmtiEnv *je, JNIEnv *jni, jthread th, jmethodID thrower, jlocation loc,
                                  jobject exc, jmethodID catch_m, jlocation catch_loc) {
 	(void)je; (void)thrower; (void)loc; (void)catch_loc;
@@ -182,7 +198,91 @@ static void JNICALL cb_exception(jvmtiEnv *je, JNIEnv *jni, jthread th, jmethodI
 		}
 	}
 	buf[n++] = '\n'; emit(buf, n);
+	if (opt_exit) {
+		struct ring_exc r; memset(&r, 0, sizeof r);
+		r.t = now_us(); r.tid = tid();
+		snprintf(r.type, sizeof r.type, "%.150s", type);
+		snprintf(r.catcher, sizeof r.catcher, "%.190s", cm ? cm->txt : "UNCAUGHT");
+		snprintf(r.app, sizeof r.app, "-");
+		for (jint i = 0; i < cnt; i++) {
+			struct mc *e = method(fr[i].method);
+			if (e && !e->boot) { snprintf(r.app, sizeof r.app, "%.230s", e->txt); break; }
+		}
+		jvmtiThreadInfo ti; memset(&ti, 0, sizeof ti);
+		if ((*J)->GetThreadInfo(J, th, &ti) == JVMTI_ERROR_NONE && ti.name) {
+			clean(r.thread, sizeof r.thread, ti.name); (*J)->Deallocate(J, (unsigned char *)ti.name);
+		} else snprintf(r.thread, sizeof r.thread, "?");
+		pthread_mutex_lock(&ring_lock);
+		ring[ring_count++ % RING_N] = r;
+		pthread_mutex_unlock(&ring_lock);
+	}
 	in_callback = 0;
+}
+
+/* ---------- process end (System.exit, Runtime.exit, Runtime.halt) ---------- */
+#define EXIT_N 3
+static const char *exit_kind[EXIT_N] = { "System.exit", "Runtime.exit", "Runtime.halt" };
+static jmethodID exit_m[EXIT_N];
+static volatile int32_t exit_first;
+static uint8_t exit_art;   /* the runtime is ART (java.vm.name is Dalvik) */
+
+static int32_t exit_index(jmethodID m) {
+	for (int32_t i = 0; i < EXIT_N; i++) if (exit_m[i] && exit_m[i] == m) return i;
+	return -1;
+}
+static void exit_hit(jthread th, int32_t k) {
+	char buf[12288]; char status[24] = "?", thread[80] = "?";
+	jint v = 0;
+	/* the slot of the int argument: on the JVM numbered from the first argument; ART numbers by dex register, and
+	   the arguments are the last registers of the frame (GetMaxLocals = registers, GetArgumentsSize = argument registers) */
+	jint ml = 0, as = 0, slot = (k == 0) ? 0 : 1;
+	if (exit_art && (*J)->GetMaxLocals(J, exit_m[k], &ml) == JVMTI_ERROR_NONE && (*J)->GetArgumentsSize(J, exit_m[k], &as) == JVMTI_ERROR_NONE)
+		slot = ml - as + ((k == 0) ? 0 : 1);
+	if ((*J)->GetLocalInt(J, th, 0, slot, &v) == JVMTI_ERROR_NONE) snprintf(status, sizeof status, "%d", (int)v);
+	jvmtiThreadInfo ti; memset(&ti, 0, sizeof ti);
+	if ((*J)->GetThreadInfo(J, th, &ti) == JVMTI_ERROR_NONE && ti.name) {
+		clean(thread, sizeof thread, ti.name); (*J)->Deallocate(J, (unsigned char *)ti.name);
+	}
+	size_t n = (size_t)snprintf(buf, sizeof buf, "X\t%lld\t%d\t%s\t%s\t%s\t", (long long)now_us(), tid(), exit_kind[k], status, thread);
+	jvmtiFrameInfo fr[40]; jint cnt = 0;
+	if ((*J)->GetStackTrace(J, th, 0, 40, fr, &cnt) == JVMTI_ERROR_NONE) {
+		for (jint i = 0; i < cnt && n < sizeof buf - 600; i++) {
+			struct mc *e = method(fr[i].method);
+			n += (size_t)snprintf(buf + n, sizeof buf - n, "%s%s%s", i ? "|" : "", (e && e->boot) ? "B:" : "", e ? e->txt : "?");
+		}
+	}
+	if (n > sizeof buf - 2) n = sizeof buf - 2;
+	buf[n++] = '\n'; emit(buf, n);
+	if (__sync_bool_compare_and_swap(&exit_first, 0, 1)) {
+		struct ring_exc r[RING_N]; uint32_t cntr;
+		pthread_mutex_lock(&ring_lock);
+		cntr = ring_count < RING_N ? ring_count : RING_N;
+		for (uint32_t i = 0; i < cntr; i++) r[i] = ring[(ring_count - cntr + i) % RING_N];
+		pthread_mutex_unlock(&ring_lock);
+		for (uint32_t i = 0; i < cntr; i++) {
+			char b[1024];
+			int32_t m = snprintf(b, sizeof b, "R\t%lld\t%d\t%s\t%s\t%s\t%s\n", (long long)r[i].t, r[i].tid, r[i].type,
+			                     r[i].thread, r[i].catcher, r[i].app);
+			if (m > (int32_t)sizeof b - 1) { m = sizeof b - 1; b[m - 1] = '\n'; }
+			emit(b, (size_t)m);
+		}
+	}
+}
+static void set_exit_hooks(JNIEnv *jni) {
+	(*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_BREAKPOINT, NULL);
+	jclass sys = (*jni)->FindClass(jni, "java/lang/System"), rt = (*jni)->FindClass(jni, "java/lang/Runtime");
+	if (sys) exit_m[0] = (*jni)->GetStaticMethodID(jni, sys, "exit", "(I)V");
+	if (rt) { exit_m[1] = (*jni)->GetMethodID(jni, rt, "exit", "(I)V"); exit_m[2] = (*jni)->GetMethodID(jni, rt, "halt", "(I)V"); }
+	(*jni)->ExceptionClear(jni);
+	char *vn = NULL;
+	if ((*J)->GetSystemProperty(J, "java.vm.name", &vn) == JVMTI_ERROR_NONE && vn) { exit_art = !strcmp(vn, "Dalvik"); (*J)->Deallocate(J, (unsigned char *)vn); }
+	uint32_t ok = 0;
+	for (int32_t i = 0; i < EXIT_N; i++) {
+		if (!exit_m[i]) { info("exit hook: method not found %s", exit_kind[i]); continue; }
+		if ((*J)->SetBreakpoint(J, exit_m[i], 0) == JVMTI_ERROR_NONE) ok++;
+		else { info("SetBreakpoint failed %s", exit_kind[i]); exit_m[i] = NULL; }
+	}
+	char z[32]; snprintf(z, sizeof z, "%u", ok); info("exit hooks %s", z);
 }
 
 /* ---------- lifecycle via breakpoints ---------- */
@@ -213,6 +313,8 @@ static jclass k_activity, k_wincb, k_fragment, k_view;   /* global refs once loa
 
 static void JNICALL cb_breakpoint(jvmtiEnv *je, JNIEnv *jni, jthread th, jmethodID m, jlocation loc) {
 	(void)je; (void)loc;
+	int32_t xk = exit_index(m);
+	if (xk >= 0) { uint8_t old = in_callback; in_callback = 1; exit_hit(th, xk); in_callback = old; return; }
 	if (in_callback) return;
 	in_callback = 1;
 	pthread_mutex_lock(&bp_lock);
@@ -371,6 +473,7 @@ static void JNICALL cb_vm_init(jvmtiEnv *je, JNIEnv *jni, jthread th) {
 	if (t) mid_getMessage = (*jni)->GetMethodID(jni, t, "getMessage", "()Ljava/lang/String;");
 	(*jni)->ExceptionClear(jni);
 	info("vm_init%s", "");
+	if (opt_exit) set_exit_hooks(jni);
 	if (opt_lc && !opt_arm[0]) { lc_active = 1; arm(jni); }
 	else if (opt_lc) start_agent_thread(jni, "atl-doctor-arm", wait_for_arm);
 	if (opt_ex) (*J)->SetEventNotificationMode(J, JVMTI_ENABLE, JVMTI_EVENT_EXCEPTION, NULL);
@@ -657,6 +760,7 @@ static jint start(JavaVM *vm, char *options) {
 		if (nx) *nx++ = 0;
 		if (!strcmp(o, "noex")) opt_ex = 0;
 		else if (!strcmp(o, "nolc")) opt_lc = 0;
+		else if (!strcmp(o, "noexit")) opt_exit = 0;
 		else if (!strncmp(o, "arm=", 4)) snprintf(opt_arm, sizeof opt_arm, "%s", o + 4);
 		else if (!strncmp(o, "late=", 5)) snprintf(opt_late, sizeof opt_late, "%s", o + 5);
 		else if (!strncmp(o, "latesec=", 8)) opt_latesec = (uint32_t)strtoul(o + 8, NULL, 10);

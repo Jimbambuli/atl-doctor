@@ -193,14 +193,16 @@ def tree_name(mark: Mark) -> str:
 
 
 def _request_tree(cap: Capture, mark: Mark, session: HeadlessSession | None = None) -> threading.Thread:
-    """In the background: the control loop must not wait for the app. With a headless session the mark also
-    gets a screenshot (shots/NN-name.png)."""
-    from .sources.shots import take_atl_shot
+    """In the background: the control loop must not wait for the app. The mark also gets an image of the app
+    window (shots/NN-name.png): from ATL itself, else, with a headless session, from spectacle."""
+    from .sources.shots import move_atl_window_shot, take_atl_shot
     from .sources.tree import request_atl_tree
 
     def run() -> None:
         if request_atl_tree(cap.path(TREES), tree_name(mark)) is None:
             _warn(f"no view tree for mark {mark.index} ({mark.name}): ATLViewDump did not answer")
+        elif move_atl_window_shot(cap.path(TREES), tree_name(mark), cap.path(SHOTS) / f"{tree_name(mark)}.png"):
+            return  # the app window from ATL itself: no screen capture needed
         if session is not None:
             try:
                 if not take_atl_shot(session, cap.path(SHOTS) / f"{tree_name(mark)}.png"):

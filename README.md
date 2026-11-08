@@ -63,6 +63,10 @@ atl-doctor pack --full run1                           # run1-FULL.tar.gz, everyt
 atl-doctor report atl-run android-run                 # with replay.jsonl on both sides: "Replayed input", target found yes/no, tree after each step
 ```
 
+Under ATL a mark's tree comes with an image of the app window alone (written by ATL's ATLViewDump as
+`shots/NN-name.png`: no screen capture, no portal, nothing of other windows); spectacle in the headless session is
+only the fallback when ATL writes none.
+
 With screenshots (`--headless`/`--steps`) the report also lists *rendering defects* (class `render`, with the view's
 ID/path, rectangle and a picture cut from the screenshot): unreadable text (WCAG contrast of the measured text colour
 against the measured background under 4.5:1, large text 3:1), text/icons/selected tabs that are one flat colour, and

@@ -672,9 +672,13 @@ class AtlDriver:
 
     def screenshot(self, name: str) -> None:
         from .capture import SHOTS
-        from .sources.shots import take_atl_shot
+        from .capture import TREES
+        from .sources.shots import atl_window_shot, take_atl_shot
 
-        if not take_atl_shot(self.session, self.cap.path(SHOTS) / f"{_safe(name)}.png"):
+        png = self.cap.path(SHOTS) / f"{_safe(name)}.png"
+        if self.cap.path(TREES).is_dir() and atl_window_shot(self.cap.path(TREES), _safe(name), png):
+            return  # the app window from ATL itself
+        if not take_atl_shot(self.session, png):
             raise DoctorError("screenshot failed (spectacle)")
 
     def wait_idle(self, timeout_s: float) -> bool:

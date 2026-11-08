@@ -747,3 +747,41 @@ def test_steps_missing_start_state_before_recording(tmp_prefix, apk, tmp_path, m
     assert main(["record", "--steps", str(steps), "-o", str(tmp_path / "c"), "--prefix", str(tmp_prefix), str(apk)]) == 1
     assert "no saved state 'missing'" in capsys.readouterr().err
     assert not (tmp_path / "c").exists()
+
+
+def test_mark_uses_the_window_image_from_atl_without_a_session(tmp_path, monkeypatch):
+    import atl_doctor.record_atl as ra
+    from atl_doctor.capture import Mark
+
+    cap = Capture.create(tmp_path / "c", "atl")
+
+    def fake_tree(d, name):  # ATLViewDump writes the tree and, beside it, the window image
+        (d / "shots").mkdir(parents=True, exist_ok=True)
+        (d / "shots" / f"{name}.png").write_bytes(b"window")
+        return d / f"{name}.xml"
+
+    monkeypatch.setattr("atl_doctor.sources.tree.request_atl_tree", fake_tree)
+    monkeypatch.setattr(ra.threading, "Thread", lambda target, daemon: type("T", (), {"start": lambda s: target()})())
+    ra._request_tree(cap, Mark(1, 0, 0, "Main view"), None)
+    assert (tmp_path / "c/shots/01-Main-view.png").read_bytes() == b"window"
+    assert not (tmp_path / "c/trees/shots/01-Main-view.png").exists()
+
+
+def test_session_screenshot_only_when_atl_wrote_no_image(tmp_path, monkeypatch):
+    import atl_doctor.record_atl as ra
+    from atl_doctor.capture import Mark
+
+    class Session:
+        def windows(self):
+            return []
+
+        def screenshot(self, path):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"spectacle")
+            return True
+
+    cap = Capture.create(tmp_path / "c", "atl")
+    monkeypatch.setattr("atl_doctor.sources.tree.request_atl_tree", lambda d, name: d / f"{name}.xml")
+    monkeypatch.setattr(ra.threading, "Thread", lambda target, daemon: type("T", (), {"start": lambda s: target()})())
+    ra._request_tree(cap, Mark(1, 0, 0, "Main view"), Session())
+    assert (tmp_path / "c/shots/01-Main-view.png").read_bytes() == b"spectacle"

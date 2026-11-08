@@ -111,6 +111,25 @@ def read_origin(png: Path) -> tuple[float, float]:
         return 0.0, 0.0
 
 
+def move_atl_window_shot(trees_dir: Path, name: str, png: Path) -> bool:
+    """ATL's own image of the app window: ATLViewDump writes trees_dir/shots/NAME.png together with the tree
+    (only the window, not the screen, no portal). Moves it to PNG; False if ATL did not write one."""
+    src = Path(trees_dir) / SHOTS / f"{name}.png"
+    if not src.is_file() or src.stat().st_size == 0:
+        return False
+    png = Path(png)
+    png.parent.mkdir(parents=True, exist_ok=True)
+    src.replace(png)
+    return True
+
+
+def atl_window_shot(trees_dir: Path, name: str, png: Path) -> bool:
+    """Ask ATLViewDump for a tree and window image under NAME and move the image to PNG."""
+    from .tree import request_atl_tree
+
+    return request_atl_tree(trees_dir, name) is not None and move_atl_window_shot(trees_dir, name, png)
+
+
 def take_atl_shot(session, png: Path) -> bool:
     """Screenshot of the headless session plus the surface origin of the main window."""
     ws = session.windows()

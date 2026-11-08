@@ -41,6 +41,6 @@ def test_viewdump_hook_patch_is_in_this_repository():
     doc = (ROOT / "docs/atlviewdump.md").read_text()
     patches = sorted((ROOT / "contrib/atl").glob("*ATLViewDump*.patch"))
     assert len(patches) == 1 and str(patches[0].relative_to(ROOT)) in doc
-    assert "atl-patches" not in doc and "lokal" not in doc
+    assert "atl-patches" not in doc
     patch = patches[0].read_text()
     assert f'new File(DIR, "{VIEWDUMP_REQUEST}")' in patch and 'System.getenv("ATL_VIEWDUMP")' in patch

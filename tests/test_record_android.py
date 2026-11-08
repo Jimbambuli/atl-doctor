@@ -277,13 +277,13 @@ def test_android_start_state_loads_avd_snapshot_before_install(adb, apk, tmp_pat
     t["emu avd snapshot"] = ["OK\n", 0]
     (adb / "table.json").write_text(json.dumps(t))
     steps = tmp_path / "s.steps"
-    steps.write_text('start_zustand: eingerichtet\nwait 0\n')
+    steps.write_text('start_state: ready\nwait 0\n')
     out = tmp_path / "c"
     assert main(["record", "--android", "--steps", str(steps), "-o", str(out), str(apk)]) == 0
     c = calls(adb)
-    load = c.index(f"emu avd snapshot load atl-doctor-{PKG}-eingerichtet")
+    load = c.index(f"emu avd snapshot load atl-doctor-{PKG}-ready")
     assert load < next(i for i, x in enumerate(c) if x.startswith("install -r "))
-    assert Capture.open(out).read_manifest().environment["start_state"] == "eingerichtet"
+    assert Capture.open(out).read_manifest().environment["start_state"] == "ready"
 
 
 def test_uiautomator_dumps_never_overlap(adb, tmp_path):
@@ -333,7 +333,7 @@ def test_android_tap_steps_write_replay_rows(adb, apk, tmp_path):
 
 def test_android_input_flag_starts_a_watcher_and_records_how_many_events(adb, apk, tmp_path, monkeypatch, capsys):
     from atl_doctor import android_input
-    from atl_doctor import bedienung as bd
+    from atl_doctor import recorded_input as bd
 
     _steps_table(adb)
     seen = {}

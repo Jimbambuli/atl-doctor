@@ -7,7 +7,7 @@ import pytest
 from atl_doctor.capture import Capture
 from atl_doctor.cli import main
 from atl_doctor.sources.shots import png_write
-from atl_doctor.vergleich import MAX_LINES, build_comparison, render_markdown
+from atl_doctor.compare import MAX_LINES, build_comparison, render_markdown
 
 APP = "org.example.demo"
 
@@ -19,7 +19,7 @@ def _capture(root: Path, side: str, agent: list[str], log: str = "", stubs: str 
     c.write_manifest(m)
     (root / "marks.tsv").write_text("")
     c.append_mark("start", 1_000_000)
-    c.append_mark("Suche", 2_000_000)
+    c.append_mark("Search", 2_000_000)
     (root / "agent.tsv").write_text("".join(x + "\n" for x in agent))
     (root / "atl.log").write_text(log)
     if stubs:
@@ -89,13 +89,13 @@ def test_markdown_is_short_with_many_findings(pair, tmp_path):
 
 def test_shot_steps_are_compared(pair, tmp_path):
     atl, android = pair
-    png_write(atl / "shots/suche.png", 100, 100, bytes((250, 250, 250, 255)) * 10000)
-    png_write(android / "shots/suche.png", 100, 200,
+    png_write(atl / "shots/search.png", 100, 100, bytes((250, 250, 250, 255)) * 10000)
+    png_write(android / "shots/search.png", 100, 200,
               b"".join(bytes((0, 0, 0, 255) if (x // 10) % 2 else (255, 255, 255, 255)) for _ in range(200) for x in range(100)))
     d = build_comparison(*pair, tmp_path / "out", no_aosp_fetch=True)
-    assert d["shots"][0]["step"] == "suche" and d["shots"][0]["finding"] == "ATL empty"
+    assert d["shots"][0]["step"] == "search" and d["shots"][0]["finding"] == "ATL empty"
     assert any(c["kind"] == "shot" for c in d["causes"])
-    assert (tmp_path / "out/shots/suche-diff.png").is_file()
+    assert (tmp_path / "out/shots/search-diff.png").is_file()
 
 
 def test_cli_with_existing_captures_writes_report(pair, tmp_path, capsys):
@@ -108,7 +108,7 @@ def test_cli_with_existing_captures_writes_report(pair, tmp_path, capsys):
 
 
 def test_cli_records_light_by_default_and_full_with_deep(tmp_path, monkeypatch, pair):
-    import atl_doctor.vergleich as v
+    import atl_doctor.compare as v
 
     seen = []
 
@@ -144,11 +144,11 @@ def test_exception_inside_the_platform_ranks_below_one_through_the_app(pair, tmp
     assert titles.index("java.lang.NullPointerException: x is null") < titles.index("native library does not load: libsqlcipher.so")
     assert titles.index("native library does not load: libsqlcipher.so") < \
         titles.index("java.nio.file.FileAlreadyExistsException: /data/lib")
-    assert d["causes"][0]["phase"] == "Suche"
+    assert d["causes"][0]["phase"] == "Search"
 
 
 def test_scenario_errors_are_in_the_report(tmp_path, monkeypatch, pair):
-    import atl_doctor.vergleich as v
+    import atl_doctor.compare as v
     from atl_doctor.errors import DoctorError
 
     def fail(opts):

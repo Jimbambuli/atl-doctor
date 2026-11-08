@@ -3,10 +3,10 @@
 
 Under ATL the app's data directory is copied (ATL keeps it in $ANDROID_APP_DATA_DIR, else
 $XDG_DATA_HOME/android_translation_layer, inside a Flatpak below ~/.var/app/ID/data, as `<apk name>_`); the copies
-live in $XDG_DATA_HOME/atl-doctor/zustand/<apk name>/NAME. On Android the emulator saves and loads a whole AVD
+live in $XDG_DATA_HOME/atl-doctor/state/<apk name>/NAME. On Android the emulator saves and loads a whole AVD
 snapshot named atl-doctor-PACKAGE-NAME (adb emu), so this needs an emulator, not a phone. Where the emulator skips
 the snapshot (an app used Vulkan), the app's /data/data directory is copied as root instead
-($XDG_DATA_HOME/atl-doctor/zustand/android/PACKAGE/NAME.tar) and loaded from there.
+($XDG_DATA_HOME/atl-doctor/state/android/PACKAGE/NAME.tar) and loaded from there.
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ def atl_data_dir(apk: Path, launcher: str | None) -> Path:
 def _store(apk: Path, name: str) -> Path:
     if not name or "/" in name or name.startswith("."):
         raise UsageError(f"bad state name {name!r}")
-    return _data_home() / "atl-doctor/zustand" / Path(apk).name / name
+    return _data_home() / "atl-doctor/state" / Path(apk).name / name
 
 
 def save_atl(apk: Path, name: str, launcher: str | None = None) -> Path:
@@ -84,7 +84,7 @@ def _android_snapshot(action: str, package: str, name: str) -> str:
         raise PrerequisiteMissing("state --android needs an emulator: no device attached (check `adb devices`)")
     adb = Adb(serial)
     snap = f"atl-doctor-{package}-{name}"
-    tar = _data_home() / "atl-doctor/zustand/android" / package / f"{name}.tar"
+    tar = _data_home() / "atl-doctor/state/android" / package / f"{name}.tar"
     if action == "load" and tar.is_file():
         return _android_data("load", adb, package, tar)
     before = _apps_kept(adb, package) if action == "load" else {}
@@ -183,7 +183,7 @@ def _android_data(action: str, adb, package: str, tar: Path) -> str:
 
 
 def load_start_state(name: str, apk: Path, android: bool, launcher: str | None = None) -> str:
-    """Load the state a scenario starts from (`start_zustand: NAME`); returns what was loaded."""
+    """Load the state a scenario starts from (`start_state: NAME`); returns what was loaded."""
     if android:
         from .sources.dex import read_apk
 
@@ -205,21 +205,13 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
-_OLD_ACTIONS = {"sichern": "save", "laden": "load"}  # the German names stay valid, hidden
-
-
-def _action(text: str) -> str:
-    return _OLD_ACTIONS.get(text, text)
-
-
 def register(sub: argparse._SubParsersAction) -> None:
     from .cli import command, done
 
     p, g = command(sub, "state", "save or load an app's state (data dir / AVD snapshot)",
                    "Save the state of an app under a name and put it back later: its data directory under\n"
-                   "ATL, an AVD snapshot with --android. A step file can begin with start_zustand: NAME.",
-                   aliases=("zustand",))
-    g.args.add_argument("action", type=_action, choices=["save", "load"], metavar="{save,load}",
+                   "ATL, an AVD snapshot with --android. A step file can begin with start_state: NAME.")
+    g.args.add_argument("action", choices=["save", "load"], metavar="{save,load}",
                         help="save the state, or load a saved one")
     g.args.add_argument("apk", metavar="APK", help="the app")
     g.args.add_argument("name", metavar="NAME", help="name of the saved state")

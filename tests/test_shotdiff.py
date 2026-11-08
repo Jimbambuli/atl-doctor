@@ -17,23 +17,23 @@ def _white(x, y):
 
 def test_same_picture_is_similar_and_density_is_honoured(tmp_path):
     a, b = tmp_path / "a", tmp_path / "b"
-    _png(a / "shots/suche.png", 200, 160, _stripes)
-    _png(b / "shots/suche.png", 400, 320 + 2 * 24, lambda x, y: _stripes(x // 2, (y - 48) // 2))  # density 2, status bar
+    _png(a / "shots/search.png", 200, 160, _stripes)
+    _png(b / "shots/search.png", 400, 320 + 2 * 24, lambda x, y: _stripes(x // 2, (y - 48) // 2))  # density 2, status bar
     rows = compare_shots(a, b, 2.0, tmp_path / "out")
-    assert [r["step"] for r in rows] == ["suche"]
+    assert [r["step"] for r in rows] == ["search"]
     assert rows[0]["similarity"] > 0.97 and rows[0]["finding"] == ""
-    assert (tmp_path / "out/suche-diff.png").is_file()
+    assert (tmp_path / "out/search-diff.png").is_file()
 
 
 def test_empty_atl_picture_is_flagged_and_sorted_first(tmp_path):
     a, b = tmp_path / "a", tmp_path / "b"
-    for n in ("gut", "leer"):
+    for n in ("good", "empty"):
         _png(b / f"shots/{n}.png", 200, 200, _stripes)
-    _png(a / "shots/gut.png", 200, 200, _stripes)
-    _png(a / "shots/leer.png", 200, 200, _white)
-    _png(a / "shots/nur-atl.png", 200, 200, _white)
+    _png(a / "shots/good.png", 200, 200, _stripes)
+    _png(a / "shots/empty.png", 200, 200, _white)
+    _png(a / "shots/only-atl.png", 200, 200, _white)
     rows = compare_shots(a, b, 1.0, tmp_path / "out")
-    assert [r["step"] for r in rows] == ["leer", "gut"]
+    assert [r["step"] for r in rows] == ["empty", "good"]
     assert rows[0]["finding"] == "ATL empty" and rows[0]["similarity"] < 0.7 and rows[0]["different"] > 0.3
 
 

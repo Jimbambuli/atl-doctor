@@ -73,7 +73,7 @@ def test_white_text_on_light_grey_button_is_unreadable(tmp_path):
     pic = Pic()
     pic.rect(btn, GREY)
     pic.text(btn, WHITE)
-    cap = make(tmp_path, tree(node("Button", "x:id/download", btn, text="Herunterladen", clickable=True)), pic)
+    cap = make(tmp_path, tree(node("Button", "x:id/download", btn, text="Download", clickable=True)), pic)
     [f] = render_findings(cap)
     assert f.kind == "render" and f.klass is Klass.RENDER and f.details["check"] == "contrast"
     assert f.details["ratio"] < 1.5 and f.details["needed"] == 4.5
@@ -98,14 +98,14 @@ def test_large_text_needs_only_three_to_one(tmp_path):
     pic = Pic()
     pic.text(small, grey, height=8)
     pic.text(large, grey, height=30)
-    xml = tree(node("TextView", "x:id/small", small, text="klein") + node("TextView", "x:id/large", large, text="gross"))
+    xml = tree(node("TextView", "x:id/small", small, text="small") + node("TextView", "x:id/large", large, text="large"))
     got = {f.details["view"] for f in render_findings(make(tmp_path, xml, pic))}
     assert got == {"id/small"}
 
 
 def test_text_not_painted_is_flat(tmp_path):
     r = (10, 10, 210, 40)
-    cap = make(tmp_path, tree(node("TextView", "x:id/t", r, text="Hallo")), Pic())
+    cap = make(tmp_path, tree(node("TextView", "x:id/t", r, text="Hello")), Pic())
     [f] = render_findings(cap)
     assert f.details["check"] == "flat" and f.details["what"] == "text" and "not painted" in f.title
 
@@ -116,7 +116,7 @@ def test_black_square_instead_of_icon_and_real_icon(tmp_path):
     pic.rect(bad, BLACK)
     pic.rect(good, BLUE)
     pic.rect((115, 25, 145, 55), WHITE)
-    xml = tree(node("ImageView", "x:id/icon", bad, desc="Warnung") + node("ImageView", "x:id/real", good, desc="Ok"))
+    xml = tree(node("ImageView", "x:id/icon", bad, desc="Warning") + node("ImageView", "x:id/real", good, desc="Ok"))
     [f] = render_findings(make(tmp_path, xml, pic))
     assert f.details["what"] == "image" and f.details["colour"] == "#000000" and f.details["view"] == "id/icon"
 
@@ -130,7 +130,7 @@ def test_decorative_image_without_description_is_not_reported(tmp_path):
 
 def test_selected_tab_orange_without_text_is_one_finding(tmp_path):
     tab = (10, 10, 130, 50)
-    inner = node("TextView", "x:id/tab_text", (20, 15, 120, 45), text="Wiedergabe")
+    inner = node("TextView", "x:id/tab_text", (20, 15, 120, 45), text="Playback")
     pic = Pic()
     pic.rect(tab, ORANGE)
     xml = tree(node("LinearLayout", "x:id/tab", tab, selected=True, clickable=True, children=inner))
@@ -139,18 +139,18 @@ def test_selected_tab_orange_without_text_is_one_finding(tmp_path):
 
 
 def test_many_unpainted_texts_become_one_blank_finding(tmp_path):
-    kids = "".join(node("TextView", f"x:id/t{i}", (10, 10 + 30 * i, 200, 35 + 30 * i), text=f"Zeile {i}") for i in range(5))
+    kids = "".join(node("TextView", f"x:id/t{i}", (10, 10 + 30 * i, 200, 35 + 30 * i), text=f"Row {i}") for i in range(5))
     [f] = render_findings(make(tmp_path, tree(kids), Pic()))
     assert f.details["what"] == "blank" and f.details["unpainted_text_views"] == 5 and "blank" in f.title
 
 
 def test_overflow_out_of_window_and_scroller_exceptions(tmp_path):
-    out = node("TextView", "x:id/out", (250, 10, 390, 40), text="breit", jrect=(250, 10, 450, 40))
+    out = node("TextView", "x:id/out", (250, 10, 390, 40), text="wide", jrect=(250, 10, 450, 40))
     inside = node("TextView", "x:id/in", (10, 60, 100, 90), text="ok")
     scroll = node("HorizontalScrollView", "x:id/hs", (0, 100, 400, 140), children=node(
         "TextView", "x:id/chip", (300, 100, 390, 140), text="chip", jrect=(300, 100, 600, 140)))
     vscroll = node("ScrollView", "x:id/vs", (0, 150, 400, 290), children=node(
-        "TextView", "x:id/below", (10, 250, 100, 280), text="unten", jrect=(10, 250, 100, 400)))
+        "TextView", "x:id/below", (10, 250, 100, 280), text="below", jrect=(10, 250, 100, 400)))
     pic = Pic()
     pic.text((250, 10, 390, 40), BLACK)
     got = render_findings(make(tmp_path, tree(out + inside + scroll + vscroll), pic))
@@ -175,16 +175,16 @@ def test_no_contrast_check_while_a_dialog_dims_the_activity(tmp_path):
     pic.rect(btn, GREY)
     pic.text(btn, WHITE)
     dialog = f'<window atl-what="dialog x.D">{node("FrameLayout", "android:id/content", (0, 0, 100, 100))}</window>'
-    got = render_findings(make(tmp_path, tree(node("Button", "x:id/b", btn, text="Hallo"), dialog), pic))
+    got = render_findings(make(tmp_path, tree(node("Button", "x:id/b", btn, text="Hello"), dialog), pic))
     assert got == []
 
 
 def test_hidden_and_disabled_views_are_ignored(tmp_path):
     r = (10, 10, 210, 40)
     pic = Pic()
-    gone = tree(node("TextView", "x:id/h", r, text="weg", shown=False))
+    gone = tree(node("TextView", "x:id/h", r, text="gone", shown=False))
     assert render_findings(make(tmp_path, gone, pic)) == []
-    off = tree(node("TextView", "x:id/d", r, text="aus")).replace('enabled="true"', 'enabled="false"')
+    off = tree(node("TextView", "x:id/d", r, text="off")).replace('enabled="true"', 'enabled="false"')
     assert render_findings(make(tmp_path / "b", off, pic)) == []
 
 
@@ -193,7 +193,7 @@ def test_android_side_gives_no_findings_but_ids_for_comparison(tmp_path):
     pic = Pic()
     pic.rect(btn, GREY)
     pic.text(btn, WHITE)
-    xml = tree(node("Button", "x:id/b", btn, text="Herunterladen"))
+    xml = tree(node("Button", "x:id/b", btn, text="Download"))
     atl, android = make(tmp_path, xml, pic), make(tmp_path, xml, pic, side="android")
     assert render_findings(android) == []
     assert {f.id for f in render_findings(atl)} == android_ids(android) != set()
@@ -204,7 +204,7 @@ def test_report_text_html_and_note(tmp_path):
     pic = Pic()
     pic.rect(btn, GREY)
     pic.text(btn, WHITE)
-    cap = make(tmp_path, tree(node("Button", "x:id/b", btn, text="Herunterladen")), pic)
+    cap = make(tmp_path, tree(node("Button", "x:id/b", btn, text="Download")), pic)
     r, root = build_capture_report(cap.root)
     assert [f.kind for f in r.findings if f.kind == "render"] == ["render"]
     html = render_html(r, root)
@@ -214,7 +214,7 @@ def test_report_text_html_and_note(tmp_path):
 
 
 def test_capture_without_screenshots_still_checks_overflow(tmp_path):
-    cap = make(tmp_path, tree(node("TextView", "x:id/out", (250, 10, 390, 40), text="breit", jrect=(250, 10, 450, 40))), Pic())
+    cap = make(tmp_path, tree(node("TextView", "x:id/out", (250, 10, 390, 40), text="wide", jrect=(250, 10, 450, 40))), Pic())
     for p in (cap.root / "shots").iterdir():
         p.unlink()
     [f] = render_findings(cap)
@@ -226,20 +226,20 @@ def test_module_names():
 
 
 def test_blank_picture_swallows_other_flat_hits_and_mid_contrast_is_low_not_unreadable(tmp_path):
-    kids = "".join(node("TextView", f"x:id/t{i}", (10, 10 + 30 * i, 200, 35 + 30 * i), text=f"Zeile {i}") for i in range(5))
-    kids += node("ImageView", "x:id/i", (300, 10, 360, 70), desc="Bild")
+    kids = "".join(node("TextView", f"x:id/t{i}", (10, 10 + 30 * i, 200, 35 + 30 * i), text=f"Row {i}") for i in range(5))
+    kids += node("ImageView", "x:id/i", (300, 10, 360, 70), desc="Picture")
     got = render_findings(make(tmp_path, tree(kids), Pic()))
     assert [f.details["what"] for f in got] == ["blank"]
     r = (10, 10, 210, 40)
     pic = Pic()
     pic.text(r, (148, 148, 148), height=8)
-    [f] = render_findings(make(tmp_path / "b", tree(node("TextView", "x:id/m", r, text="mittel")), pic))
+    [f] = render_findings(make(tmp_path / "b", tree(node("TextView", "x:id/m", r, text="medium")), pic))
     assert f.title.startswith("Low-contrast text, contrast 3.") or f.title.startswith("Low-contrast text, contrast 2.")
 
 
 def test_view_covered_by_a_later_page_is_not_judged(tmp_path):
     hud = node("ImageButton", "x:id/hud", (10, 10, 60, 60), desc="Zoom")
-    page = node("LinearLayout", "x:id/page", (0, 0, W, H), children=node("TextView", "x:id/t", (10, 100, 200, 130), text="Seite"))
+    page = node("LinearLayout", "x:id/page", (0, 0, W, H), children=node("TextView", "x:id/t", (10, 100, 200, 130), text="Page"))
     pic = Pic()
     pic.text((10, 100, 200, 130), BLACK)
     assert render_findings(make(tmp_path, tree(hud + page), pic)) == []
@@ -256,7 +256,7 @@ def test_pair_report_drops_defects_that_android_shows_too(tmp_path):
     good = Pic()
     good.rect(btn, BLUE)
     good.text(btn, WHITE)
-    xml = tree(node("Button", "x:id/b", btn, text="Herunterladen"))
+    xml = tree(node("Button", "x:id/b", btn, text="Download"))
     atl = make(tmp_path / "t1", xml, bad)
     same = make(tmp_path / "t1", xml, bad, side="android")
     other = make(tmp_path / "t2", xml, good, side="android")

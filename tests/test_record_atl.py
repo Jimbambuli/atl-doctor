@@ -728,22 +728,22 @@ def test_steps_start_state_is_loaded_before_atl(tmp_prefix, apk, tmp_path, monke
     _fake_steps(monkeypatch)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("ANDROID_APP_DATA_DIR", str(tmp_path / "data"))
-    saved = tmp_path / "xdg/atl-doctor/zustand" / apk.name / "eingerichtet"
+    saved = tmp_path / "xdg/atl-doctor/state" / apk.name / "ready"
     saved.mkdir(parents=True)
     (saved / "p.xml").write_text("ok")
     steps = tmp_path / "s.steps"
-    steps.write_text('start_zustand: eingerichtet\nwait-window "Demo"\n')
+    steps.write_text('start_state: ready\nwait-window "Demo"\n')
     c = tmp_path / "c"
     assert main(["record", "--steps", str(steps), "-o", str(c), "--prefix", str(tmp_prefix), str(apk), "--", "--wait"]) == 0
     assert (tmp_path / "data" / f"{apk.name}_" / "p.xml").read_text() == "ok"
-    assert Capture.open(c).read_manifest().environment["start_state"] == "eingerichtet"
+    assert Capture.open(c).read_manifest().environment["start_state"] == "ready"
 
 
 def test_steps_missing_start_state_before_recording(tmp_prefix, apk, tmp_path, monkeypatch, capsys):
     _fake_steps(monkeypatch)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     steps = tmp_path / "s.steps"
-    steps.write_text('start_zustand: fehlt\nwait 0\n')
+    steps.write_text('start_state: missing\nwait 0\n')
     assert main(["record", "--steps", str(steps), "-o", str(tmp_path / "c"), "--prefix", str(tmp_prefix), str(apk)]) == 1
-    assert "no saved state 'fehlt'" in capsys.readouterr().err
+    assert "no saved state 'missing'" in capsys.readouterr().err
     assert not (tmp_path / "c").exists()

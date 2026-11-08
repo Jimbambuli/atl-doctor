@@ -75,7 +75,7 @@ stay unfiltered; nothing is dropped silently.
 The agent sets breakpoints in System.exit, Runtime.exit and Runtime.halt (agent option \fBnoexit\fR turns that off).
 The report's \fBExit cause\fR section then names the first call: the exit status, the calling app frame, the thread,
 the stack and the last five exceptions before it. If the process ended without such a call, the finding says
-"Ende ohne System.exit/Runtime.exit erfasst" and gives the process's exit status or signal.
+"Ended without a System.exit/Runtime.exit call being seen" and gives the process's exit status or signal.
 .PP
 When a \fBclose\-window\fR step ran, \fBrecord\fR measures whether ATL's process ends within 5 s. The environment
 section always has the line "Ends after window close": "yes (1.2 s)", "no (still running after 5 s)" or "not checked"
@@ -382,7 +382,7 @@ Write the step file here.
 \fBstate save\fR \fIAPK NAME\fR saves the app's state, \fBstate load\fR \fIAPK NAME\fR puts it back.
 Under ATL that is a copy of the app's data directory ($ANDROID_APP_DATA_DIR, else
 $XDG_DATA_HOME/android_translation_layer, for a Flatpak launcher ~/.var/app/\fIID\fR/data/android_translation_layer;
-the directory is \fIapk name\fR_), kept in $XDG_DATA_HOME/atl\-doctor/zustand.
+the directory is \fIapk name\fR_), kept in $XDG_DATA_HOME/atl\-doctor/state.
 .RS
 .TP
 .B \-\-android
@@ -425,7 +425,7 @@ is one, and the report says \fBnot found\fR for this step. Each tap, click, key,
 no key for (umlauts, for example) and characters outside the Basic Multilingual Plane (emoji) cannot be typed
 and fail the step.
 .PP
-A step file may begin with \fBstart_zustand:\fR \fINAME\fR: \fBrecord\fR (and \fBcompare\fR) first loads the
+A step file may begin with \fBstart_state:\fR \fINAME\fR: \fBrecord\fR (and \fBcompare\fR) first loads the
 state saved with \fBstate save\fR, under ATL and on Android.
 .PP
 The same file runs under ATL and on Android, so the two recordings can be compared step by step.

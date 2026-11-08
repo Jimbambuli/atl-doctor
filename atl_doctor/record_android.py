@@ -167,7 +167,7 @@ def record_android(opts: RecordOptions) -> int:
         raise DoctorError(f"{opts.apk}: no package name in the manifest")
     pkg = info.package
     if state:
-        from .zustand import load_start_state
+        from .state import load_start_state
 
         _warn(f"start state {state}: {load_start_state(state, opts.apk, True)}")
     opts.apk = opts.apk.resolve()

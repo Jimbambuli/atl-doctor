@@ -29,4 +29,4 @@ Crashes
       -> Fix the crash first; later findings may be consequences.
 
 Exit cause
-  df514dc0    0  Ende ohne System.exit/Runtime.exit erfasst (Exit-Hooks des Agenten: ohne Angabe)  [1x, first: Import]
+  df514dc0    0  Ended without a System.exit/Runtime.exit call being seen (agent exit hooks: not reported)  [1x, first: Import]

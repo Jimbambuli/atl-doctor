@@ -90,7 +90,7 @@ def exception_findings(events: list[AgentEvent], marks: list[Mark], side: str) -
     return list(found.values())
 
 
-EXIT_NONE = "Ende ohne System.exit/Runtime.exit erfasst"
+EXIT_NONE = "Ended without a System.exit/Runtime.exit call being seen"
 EXIT_HOOKS = 3  # breakpoints the agent sets: System.exit, Runtime.exit, Runtime.halt
 
 
@@ -112,7 +112,7 @@ def exit_findings(events: list[AgentEvent], status: int | None, signal: str | No
     if not xs:
         title = EXIT_NONE
         if hooks != EXIT_HOOKS:
-            title += f" (Exit-Hooks des Agenten: {'ohne Angabe' if hooks is None else f'{hooks} von {EXIT_HOOKS}'})"
+            title += f" (agent exit hooks: {'not reported' if hooks is None else f'{hooks} of {EXIT_HOOKS}'})"
         klass = Klass.CRASH if (signal or status) else Klass.OTHER
         return [Finding("exit", "cause:none", klass, title,
                         "The process ended in another way (native exit, signal, crash of the runtime); see the crash findings "

@@ -235,7 +235,7 @@ def render_text(r: Report) -> str:
     if r.extras.get("steps"):
         section("Steps", _step_lines(r.extras["steps"]))
     if r.extras.get("replay"):
-        from .bedienung import replay_lines
+        from .recorded_input import replay_lines
 
         section("Replayed input (ATL / Android)", replay_lines(r.extras["replay"]))
     if r.extras.get("timeline"):
@@ -363,7 +363,7 @@ def render_html(r: Report, capture_dir: Path | None = None) -> str:
     if r.extras.get("steps"):
         section("Steps", _step_table_html(r.extras["steps"]))
     if r.extras.get("replay"):
-        from .bedienung import replay_html
+        from .recorded_input import replay_html
 
         section("Replayed input (ATL / Android)", replay_html(r.extras["replay"], _e))
     if r.extras.get("timeline"):
@@ -632,7 +632,7 @@ def build_pair_report(atl_dir: Path, android_dir: Path, density: float | None,
     steps = step_table(Capture(root), acap)
     if steps:
         r.extras["steps"] = steps
-    from .bedienung import replay_table
+    from .recorded_input import replay_table
 
     replay = replay_table(Capture(root), acap, density)
     if replay:

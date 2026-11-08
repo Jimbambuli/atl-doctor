@@ -26,16 +26,12 @@ def _plain(text: str) -> str:
 def test_manpage_lists_every_subcommand_and_option():
     text = _plain(MAN.read_text(encoding="utf-8"))
     top, subs = _subparsers()
-    assert sorted(c for c in subs if c not in ('vergleich', 'zustand')) == sorted(COMMANDS)  # minus the hidden old names
+    assert sorted(subs) == sorted(COMMANDS)
     missing = []
     for name, sp in subs.items():
-        if name in ('vergleich', 'zustand'):
-            continue
         if not re.search(rf"^\.B {name}$", text, re.M):
             missing.append(f"command {name}")
         for a in sp._actions:
-            if a.help is argparse.SUPPRESS:
-                continue  # hidden alias for an old name
             for opt in a.option_strings:
                 if not re.search(rf"(?<![\w-]){re.escape(opt)}(?![\w-])", text):
                     missing.append(f"{name} {opt}")

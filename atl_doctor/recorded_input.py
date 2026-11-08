@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Recorded input ("Bedienung"): `input.jsonl` in a capture directory, and scenarios made from it.
+"""Recorded input: `input.jsonl` in a capture directory, and scenarios made from it.
 
 Format 1, one JSON object per line, UTF-8. Line 1 is the header, every further line one input event:
 

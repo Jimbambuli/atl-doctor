@@ -25,7 +25,7 @@ OPAQUE = ("android.webkit.WebView", "androidx.compose.ui.platform.AndroidCompose
 ENVIRONMENT_IDS = ("android:id/statusBarBackground", "android:id/navigationBarBackground")
 SIZE_MIN_FRACTION = 0.2  # a size difference also has to exceed 20 % of the Android size
 # request file name of the existing ATLViewDump patch; one place, so an upstream name is easy to follow
-VIEWDUMP_REQUEST = "anfrage"
+VIEWDUMP_REQUEST = "request"
 _REQUEST_LOCK = threading.Lock()
 
 Rect = tuple[float, float, float, float]

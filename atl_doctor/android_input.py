@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Record the input on an Android device or emulator into input.jsonl (see bedienung.py): `getevent -lt` for touches
+"""Record the input on an Android device or emulator into input.jsonl (see recorded_input.py): `getevent -lt` for touches
 and keys, `uiautomator dump` in a loop for the targets.
 
 A touch is resolved against the last dump that was complete before the finger went down (the screen as the user saw
@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .bedienung import INPUT_FILE, make_event, make_header, target_at, write_input
+from .recorded_input import INPUT_FILE, make_event, make_header, target_at, write_input
 from .capture import TREES, Capture, now_us
 from .errors import DoctorError
 

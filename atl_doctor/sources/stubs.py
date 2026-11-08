@@ -37,8 +37,6 @@ STUB_KINDS = {"empty", "empty0", "emptythis", "const", "returnsarg", "throws", "
 RESULT_KINDS = {"empty0", "emptythis", "const", "returnsarg", "native-empty0", "native-const"}
 
 STUBTEXT = re.compile(r"stub|not implemented|unimplemented|\btodo\b|fixme", re.I)
-_KIND_NAMES = {"leer": "empty", "leer0": "empty0", "leerthis": "emptythis", "konst": "const", "wirft": "throws",
-               "meldet": "logs"}  # historic names used inside the scanner
 
 
 @dataclass(frozen=True)

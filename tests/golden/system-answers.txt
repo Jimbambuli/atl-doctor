@@ -20,7 +20,7 @@ Fix first
       -> The app sees a different answer from the system than on Android.
 
 Exit cause
-  df514dc0    0  Ende ohne System.exit/Runtime.exit erfasst  [1x, first: start]
+  df514dc0    0  Ended without a System.exit/Runtime.exit call being seen  [1x, first: start]
 
 System answers differ
   0b5af2bb   40  connectivity.activeNetwork: ATL null, Android present  [1x, first: start]

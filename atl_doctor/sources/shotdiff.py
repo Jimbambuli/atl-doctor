@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Screenshots of ATL and Android compared step by step (screenshots with the same name in shots/).
 
-Taken over from the experiment tool bildvergleich.py, without PIL: both pictures are cut to the app content in dp
+Taken over from an earlier experimental tool, without PIL: both pictures are cut to the app content in dp
 (ATL: window surface origin plus content origin from the view tree of that name, else from any other tree;
 Android: content origin from a view tree likewise, without the system bars: status and navigation bar heights from the
 view tree (statusBarBackground, navigationBarBackground), else from the insets recorded at capture time

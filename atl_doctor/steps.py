@@ -8,7 +8,7 @@ One command per line or separated by ';', '#' starts a comment outside quotes:
         goes to the rectangle's centre and replay.jsonl says "not found")
     type "text"   scroll N   scroll-smooth DY   wait SECONDS   wait-idle [TIMEOUT]   mark ["name"]   screenshot "name"
     repeat N { ... }   (also over several lines, nested)
-A scenario may begin with `start_zustand: NAME`: the app's state saved with `atl-doctor state save` is loaded
+A scenario may begin with `start_state: NAME`: the app's state saved with `atl-doctor state save` is loaded
 before the app starts.
 """
 from __future__ import annotations
@@ -196,11 +196,11 @@ def _command(name: _Tok, args: list[_Tok], filename: str) -> Step:
     raise err(f"unknown command '{cmd}'")
 
 
-_START_STATE = re.compile(r"^\s*start_zustand:\s*(\S+)\s*$")
+_START_STATE = re.compile(r"^\s*start_state:\s*(\S+)\s*$")
 
 
 def _split_start_state(text: str, filename: str) -> tuple[str | None, str]:
-    """The name of a leading `start_zustand: NAME` line and the text with that line blanked (line numbers stay)."""
+    """The name of a leading `start_state: NAME` line and the text with that line blanked (line numbers stay)."""
     lines = text.split("\n")
     first = next((i for i, x in enumerate(lines) if x.split("#", 1)[0].strip()), None)
     name = None
@@ -209,13 +209,13 @@ def _split_start_state(text: str, filename: str) -> tuple[str | None, str]:
         if not m:
             continue
         if i != first:
-            raise StepError(filename, i + 1, "start_zustand only once, before the first step")
+            raise StepError(filename, i + 1, "start_state only once, before the first step")
         name, lines[i] = m.group(1), ""
     return name, "\n".join(lines)
 
 
 def start_state(text: str, filename: str = "-") -> str | None:
-    """Name of the state a scenario starts from (`start_zustand: NAME`), or None."""
+    """Name of the state a scenario starts from (`start_state: NAME`), or None."""
     return _split_start_state(text, filename)[0]
 
 
@@ -351,7 +351,7 @@ def run_steps(steps: list[Step | Repeat], driver: Driver, filename: str, log: Te
     """Run the steps in order; one line per step in log; failures raise StepError with the line number.
 
     data (steps.tsv, see sources/stepstats.py) gets one row per finished step with its times and, if the driver offers
-    frame_count()/scroll_tree(), the frames drawn and the distance scrolled. replay (replay.jsonl, see bedienung.py) gets
+    frame_count()/scroll_tree(), the frames drawn and the distance scrolled. replay (replay.jsonl, see recorded_input.py) gets
     one JSON row per input step: whether a tap's target was found and how, and the view tree taken after the step."""
     from .capture import now_us
 
@@ -409,7 +409,7 @@ def _replay_row(out: TextIO, n: int, s: Step, d: Driver, info: dict | None) -> N
 def _tap(s: Step, d: Driver) -> dict:
     """tap/long-tap: look the target up (id, text, path), else go to the recorded rectangle; never raises for a
     missing target, the replay report shows it."""
-    from .bedienung import resolve_target
+    from .recorded_input import resolve_target
 
     id_, text, path, rect_s = s.args
     rect = [float(x) for x in str(rect_s).split(",")] if rect_s else None

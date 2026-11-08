@@ -204,17 +204,16 @@ def _run(args: argparse.Namespace) -> int:
 
 
 def register(sub: argparse._SubParsersAction) -> None:
-    from .cli import alias, command, done
+    from .cli import command, done
 
     p, g = command(sub, "compare", "record under ATL and on Android, report the differences",
                    "Record the same scenario under ATL and on an Android device and write a short report of\n"
-                   "the differences (OUT/report.md, OUT/report.json).", aliases=("vergleich",))
+                   "the differences (OUT/report.md, OUT/report.json).")
     g.args.add_argument("apk", metavar="APK", help="the app to record")
     g.args.add_argument("atl_args", nargs="*", metavar="ATL-ARGS",
                         help="arguments for android-translation-layer, after --")
     g.input.add_argument("--scenario", metavar="FILE",
                          help="step file for both sides (default: wait 15 s, then one screenshot \"start\")")
-    alias(g.input, "--szenario", "--scenario")
     g.input.add_argument("--atl-dir", metavar="DIR", help="compare this ATL capture instead of recording")
     g.input.add_argument("--android-dir", metavar="DIR", help="compare this Android capture instead of recording")
     g.input.add_argument("--density", type=float, metavar="D",
@@ -228,6 +227,5 @@ def register(sub: argparse._SubParsersAction) -> None:
     g.advanced.add_argument("--deep", action="store_true",
                             help="full method trace and agent from the start (debuggable app: interpreter, "
                                  "timing changes)")
-    alias(g.advanced, "--tief", "--deep")
     g.advanced.add_argument("--no-aosp-fetch", action="store_true", help="do not download AOSP source (see report)")
     done(p, g, _run)

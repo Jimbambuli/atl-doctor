@@ -45,9 +45,9 @@ def test_no_exit_call_recorded_says_so():
 
 def test_no_exit_call_and_hooks_not_reported():
     (f,) = exit_findings([], 10, None, MARKS, "atl")
-    assert f.title.startswith(EXIT_NONE) and "ohne Angabe" in f.title
+    assert f.title.startswith(EXIT_NONE) and "not reported" in f.title
     (g,) = exit_findings(parse_agent_lines(["I\t1\t1\texit hooks 2"]), 0, None, MARKS, "atl")
-    assert "2 von 3" in g.title and g.klass is Klass.OTHER
+    assert "2 of 3" in g.title and g.klass is Klass.OTHER
 
 
 def _cap(tmp_path):

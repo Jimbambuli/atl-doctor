@@ -10,12 +10,12 @@ from atl_doctor.steps import Repeat, Step, StepError, parse_steps, run_steps
 SPEC_EXAMPLE = '''wait-window "My App"       # until the window is there (title or app package)
 click "Playlist"           # text, resource ID (id/foo) or dp coordinates (x,y)
 key Escape                 # keys as xkb names, combinations ctrl+a
-type "Hallo"
+type "Hello"
 scroll 5                   # notches, negative = up
 wait 2                     # seconds
 wait-idle                  # until no frame/layout change any more (time limit)
 mark "Import"              # phase mark (+ view tree + screenshot)
-repeat 10 { click "Weiter"; key Escape }   # repetition, e.g. for memory growth
+repeat 10 { click "Next"; key Escape }   # repetition, e.g. for memory growth
 screenshot "name"
 '''
 
@@ -27,7 +27,7 @@ def test_parse_all_commands():
     assert rep.count == 10 and [b.cmd for b in rep.body] == ["click", "key"]
     by = {x.cmd: x for x in s if isinstance(x, Step)}
     assert by["wait-window"].args == ("My App", 60.0)
-    assert by["key"].args == ("Escape",) and by["type"].args == ("Hallo",)
+    assert by["key"].args == ("Escape",) and by["type"].args == ("Hello",)
     assert by["scroll"].args == (5,) and by["wait"].args == (2.0,) and by["wait-idle"].args == (10.0,)
     assert by["mark"].args == ("Import",) and by["screenshot"].args == ("name",)
     assert rep.line == 9 and by["screenshot"].line == 10
@@ -81,7 +81,7 @@ class FakeDriver:
     def __init__(self, has_tree=True, nodes=None):
         self.calls = []
         self.has_tree = has_tree
-        self.nodes = nodes or {"Weiter": (10.0, 20.0)}
+        self.nodes = nodes or {"Next": (10.0, 20.0)}
 
     def click(self, x, y): self.calls.append(("click", x, y))
     def locate(self, sel): self.calls.append(("locate", sel)); return self.nodes.get(sel)
@@ -99,16 +99,16 @@ class FakeDriver:
 def test_run_steps_with_fake_driver_repeat_and_marks():
     d = FakeDriver()
     log = io.StringIO()
-    run_steps(parse_steps('repeat 3 { click "Weiter"; mark "Weiter" }\nkey ctrl+a', "s"), d, "s", log)
-    assert [c for c in d.calls if c[0] == "mark"] == [("mark", "Weiter")] * 3
-    assert d.calls[:2] == [("locate", "Weiter"), ("click", 10.0, 20.0)]
+    run_steps(parse_steps('repeat 3 { click "Next"; mark "Next" }\nkey ctrl+a', "s"), d, "s", log)
+    assert [c for c in d.calls if c[0] == "mark"] == [("mark", "Next")] * 3
+    assert d.calls[:2] == [("locate", "Next"), ("click", 10.0, 20.0)]
     assert d.calls[-1] == ("key", "ctrl+a")
     assert len(log.getvalue().splitlines()) == 7
 
 
 def test_click_text_without_tree_fails_with_line():
     with pytest.raises(StepError) as e:
-        run_steps(parse_steps('click 1,2\nclick "Weiter"', "s.txt"), FakeDriver(has_tree=False), "s.txt", io.StringIO())
+        run_steps(parse_steps('click 1,2\nclick "Next"', "s.txt"), FakeDriver(has_tree=False), "s.txt", io.StringIO())
     assert str(e.value) == "s.txt:2: click by text needs a view tree (ATLViewDump/uiautomator)"
 
 
@@ -290,22 +290,22 @@ def test_wait_window_without_a_watch_polls_the_windows(tmp_path):
     assert d.wait_window("Demo", 5) and d.event_us is None and d.session.placed == 1
 
 
-# ------------------------------------------------------------------ start_zustand
+# ------------------------------------------------------------------ start_state
 def test_start_state_read_from_first_line():
     from atl_doctor.steps import start_state
 
-    assert start_state("# Aurora\nstart_zustand: eingerichtet\nclick \"Suche\"\n") == "eingerichtet"
-    assert start_state("click \"Suche\"\n") is None
+    assert start_state("# Aurora\nstart_state: ready\nclick \"Search\"\n") == "ready"
+    assert start_state("click \"Search\"\n") is None
 
 
 def test_start_state_line_is_no_step_and_keeps_line_numbers():
-    steps = parse_steps("start_zustand: x\nwait 1\n", "s")
+    steps = parse_steps("start_state: x\nwait 1\n", "s")
     assert steps == [Step(2, "wait", (1.0,))]
 
 
 def test_start_state_only_before_the_first_step():
-    with pytest.raises(StepError, match="s:2: start_zustand"):
-        parse_steps("wait 1\nstart_zustand: x\n", "s")
+    with pytest.raises(StepError, match="s:2: start_state"):
+        parse_steps("wait 1\nstart_state: x\n", "s")
 
 
 def test_click_with_android_coordinates():

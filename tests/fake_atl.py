@@ -36,8 +36,8 @@ def main() -> None:
         signal.signal(signal.SIGTERM, lambda *_: (print("fake atl: SIGTERM", flush=True), sys.exit(0)))
         dump = os.environ.get("ATL_VIEWDUMP") if "--viewdump" in opt else None
         while True:
-            if dump and os.path.exists(os.path.join(dump, "anfrage")):
-                req = os.path.join(dump, "anfrage")
+            if dump and os.path.exists(os.path.join(dump, "request")):
+                req = os.path.join(dump, "request")
                 name = open(req, encoding="utf-8").read().strip()
                 if "--dump-delay" in opt:
                     time.sleep(float(args[args.index("--dump-delay") + 1]))

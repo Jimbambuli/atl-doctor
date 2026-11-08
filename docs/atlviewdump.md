@@ -17,10 +17,10 @@ reports have no view tree section.
 
 ## Protocol
 
-1. With `ATL_VIEWDUMP=DIR` set, the app's main thread checks every 250 ms for the file `DIR/anfrage`.
-2. `atl-doctor` writes the wanted name (one line, e.g. `01-Import`) to `DIR/anfrage`, atomically
+1. With `ATL_VIEWDUMP=DIR` set, the app's main thread checks every 250 ms for the file `DIR/request`.
+2. `atl-doctor` writes the wanted name (one line, e.g. `01-Import`) to `DIR/request`, atomically
    (temporary file + rename).
-3. The hook writes `DIR/<name>.xml` (via `<name>.xml.tmp` and rename) and deletes `DIR/anfrage`.
+3. The hook writes `DIR/<name>.xml` (via `<name>.xml.tmp` and rename) and deletes `DIR/request`.
 4. `atl-doctor` waits up to 10 s for the request file to disappear and the XML to exist; otherwise it
    prints one line on stderr and goes on without a tree for that mark.
 

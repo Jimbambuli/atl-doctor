@@ -22,7 +22,7 @@ from .capture import (AGENT, ATL_LOG, CONTROL, MARKS, SHOTS, STEPS_DATA, STEPS_L
                       Mark)
 from .env import (AGENT_LIB, INPUT_HELPER, TRACECOUNT, WHEEL_SHIM, Probe, find_helper, has_viewdump, jvmti_plugin, lib_dir,
                   probe_all, resolve)
-from .bedienung import REPLAY_FILE
+from .recorded_input import REPLAY_FILE
 from .errors import DoctorError, PrerequisiteMissing, UsageError
 from .headless import APP_HEIGHT, APP_WIDTH, HeadlessSession
 from .sources.trace import write_watch_file
@@ -31,7 +31,7 @@ ARM_FILE = "armed"
 HANG_MS = 100     # main thread blocked longer than this is a hang (Spec 6.4)
 RUN_DIR = "run"  # private KWin session: socket, D-Bus address, logs, input helper FIFO
 # The lifecycle breakpoints are set from the start: an ART that reports dex pc events only for the methods that
-# need them (Instrumentation::NeedsDexPcEvents(), art_standalone jw-fehler) runs the rest at almost normal speed.
+# need them (Instrumentation::NeedsDexPcEvents(), a patched art_standalone) runs the rest at almost normal speed.
 # With an older ART the breakpoint listener slows every interpreted method down (JW Library: window 0.68 -> 1.37 s).
 ARM_AFTER_S = 0.0
 TREE_WAIT_S = 30.0  # tree request (10 s) + screenshot of a mark sent by the last step
@@ -269,7 +269,7 @@ def _start_steps(cap: Capture, driver, steps: list, filename: str) -> dict:
 def record_atl(opts: RecordOptions) -> int:
     from .sources.dex import read_apk
     from .steps import parse_steps, start_state
-    from .zustand import load_start_state
+    from .state import load_start_state
 
     if opts.launcher:
         import shutil
@@ -539,7 +539,7 @@ def _finish(cap: Capture, m, rc: int, stop: _Stop, steps_state: dict, count_proc
     if steps_state.get("window_close"):
         m.environment["window_close"] = json.dumps(steps_state["window_close"])
     try:
-        from .bedienung import write_atl_input
+        from .recorded_input import write_atl_input
 
         n_input = write_atl_input(cap, m.package)
         if n_input:
@@ -618,7 +618,7 @@ def _run_mark(args: argparse.Namespace) -> int:
 
 
 def register(sub) -> None:
-    from .cli import alias, command, done
+    from .cli import command, done
 
     p, g = command(sub, "record", "record an app under ATL (or on Android) into a capture",
                    "Run APK under android-translation-layer with the agent and write a capture directory\n"

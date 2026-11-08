@@ -51,9 +51,9 @@ class Groups:
         self.general = p.add_argument_group("General")
 
 
-def command(sub, name: str, help: str, description: str, aliases: tuple[str, ...] = ()) -> tuple[_Parser, Groups]:
-    """Add a subcommand; `aliases` are old names that still work but do not show in --help."""
-    p = sub.add_parser(name, help=help, description=description, aliases=list(aliases))
+def command(sub, name: str, help: str, description: str) -> tuple[_Parser, Groups]:
+    """Add a subcommand."""
+    p = sub.add_parser(name, help=help, description=description)
     return p, Groups(p)
 
 
@@ -61,17 +61,6 @@ def done(p: argparse.ArgumentParser, g: Groups, func) -> None:
     """Close a command: -h/-q/-v into General and the function to run."""
     finish(g.general)
     p.set_defaults(func=func)
-
-
-def alias(group, old: str, new: str) -> None:
-    """Accept the old option name `old` for the option `new` of `group`, without showing it in --help."""
-    act = next(a for a in group._group_actions if new in a.option_strings)
-    kw: dict = {"dest": act.dest, "default": act.default, "help": argparse.SUPPRESS}
-    if act.nargs == 0:
-        kw["action"] = "store_true" if act.const is True else "store_false"
-    else:
-        kw.update(type=act.type, metavar=act.metavar)
-    group.add_argument(old, **kw)
 
 
 def finish(g) -> None:
@@ -109,12 +98,12 @@ def _overview(sub) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    from . import bedienung, diff, env, pack, record_atl, report, vergleich, zustand
+    from . import recorded_input, diff, env, pack, record_atl, report, compare, state
     from .sources import scan
 
     parser = _Parser(prog="atl-doctor", formatter_class=_RawFormatter)
     sub = parser.add_subparsers(dest="command", parser_class=_Parser, metavar="COMMAND", help=argparse.SUPPRESS)
-    for mod in (record_atl, report, diff, scan, env, vergleich, zustand, bedienung, pack):
+    for mod in (record_atl, report, diff, scan, env, compare, state, recorded_input, pack):
         mod.register(sub)
     parser.usage = "atl-doctor [-h] [-q] [-v] [--version] COMMAND ..."
     parser.description = _overview(sub)

@@ -3,7 +3,7 @@ usage: atl-doctor state [--android] [--launcher CMD] [-h] [-q] [-v]
 
 Save the state of an app under a name and put it back later: its data
 directory under ATL, an AVD snapshot with --android. A step file can begin
-with start_zustand: NAME.
+with start_state: NAME.
 
 Arguments:
   {save,load}     save the state, or load a saved one

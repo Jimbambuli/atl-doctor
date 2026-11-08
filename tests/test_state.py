@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from atl_doctor.cli import main
-from atl_doctor.zustand import atl_data_dir
+from atl_doctor.state import atl_data_dir
 from test_record_android import PKG, adb, apk, calls, table  # noqa: F401 (fixtures)
 
 
@@ -30,18 +30,18 @@ def test_atl_data_dir_default_and_overrides(home, monkeypatch):
 def test_atl_save_and_load_roundtrip(home, apk, capsys):
     data = atl_data_dir(apk, None)
     (data / "shared_prefs").mkdir(parents=True)
-    (data / "shared_prefs/p.xml").write_text("eingerichtet")
-    assert main(["state", "save", str(apk), "eingerichtet"]) == 0
-    (data / "shared_prefs/p.xml").write_text("verdorben")
-    (data / "neu.txt").write_text("x")
-    assert main(["state", "load", str(apk), "eingerichtet"]) == 0
-    assert (data / "shared_prefs/p.xml").read_text() == "eingerichtet"
-    assert not (data / "neu.txt").exists()
+    (data / "shared_prefs/p.xml").write_text("ready")
+    assert main(["state", "save", str(apk), "ready"]) == 0
+    (data / "shared_prefs/p.xml").write_text("corrupt")
+    (data / "new.txt").write_text("x")
+    assert main(["state", "load", str(apk), "ready"]) == 0
+    assert (data / "shared_prefs/p.xml").read_text() == "ready"
+    assert not (data / "new.txt").exists()
 
 
 def test_atl_load_unknown_state_is_an_error(home, apk, capsys):
-    assert main(["state", "load", str(apk), "fehlt"]) == 1
-    assert "no saved state 'fehlt'" in capsys.readouterr().err
+    assert main(["state", "load", str(apk), "missing"]) == 1
+    assert "no saved state 'missing'" in capsys.readouterr().err
 
 
 def test_atl_save_without_data_dir_is_an_error(home, apk, capsys):
@@ -54,12 +54,12 @@ def test_android_uses_avd_snapshot(adb, apk):  # noqa: F811
     t = json.loads((adb / "table.json").read_text())
     t["emu avd snapshot"] = ["OK\n", 0]
     (adb / "table.json").write_text(json.dumps(t))
-    assert main(["state", "save", "--android", str(apk), "eingerichtet"]) == 0
-    assert main(["state", "load", "--android", str(apk), "eingerichtet"]) == 0
+    assert main(["state", "save", "--android", str(apk), "ready"]) == 0
+    assert main(["state", "load", "--android", str(apk), "ready"]) == 0
     c = calls(adb)
-    assert f"emu avd snapshot save atl-doctor-{PKG}-eingerichtet" in c
-    assert f"emu avd snapshot load atl-doctor-{PKG}-eingerichtet" in c
-    assert c.index(f"emu avd snapshot load atl-doctor-{PKG}-eingerichtet") < len(c) - 1  # waits for the device after
+    assert f"emu avd snapshot save atl-doctor-{PKG}-ready" in c
+    assert f"emu avd snapshot load atl-doctor-{PKG}-ready" in c
+    assert c.index(f"emu avd snapshot load atl-doctor-{PKG}-ready") < len(c) - 1  # waits for the device after
 
 
 def test_android_snapshot_failure_is_an_error(adb, apk, capsys):  # noqa: F811
@@ -77,10 +77,10 @@ def test_android_falls_back_to_the_app_data_when_the_emulator_refuses_a_snapshot
     t["emu avd snapshot save"] = ["KO: Snapshot save is skipped. Reason: UNSUPPORTED_VK_APP\n", 0]
     t["exec-out tar"] = ["TARDATA", 0]
     (adb / "table.json").write_text(json.dumps(t))
-    assert main(["state", "save", "--android", str(apk), "angemeldet"]) == 0
-    saved = home / f".local/share/atl-doctor/zustand/android/{PKG}/angemeldet.tar"
+    assert main(["state", "save", "--android", str(apk), "signed_in"]) == 0
+    saved = home / f".local/share/atl-doctor/state/android/{PKG}/signed_in.tar"
     assert saved.read_bytes() == b"TARDATA"
-    assert main(["state", "load", "--android", str(apk), "angemeldet"]) == 0
+    assert main(["state", "load", "--android", str(apk), "signed_in"]) == 0
     c = calls(adb)
     assert f"exec-out tar -C /data/data -cf - {PKG}" in c
     assert not any(x.startswith("emu avd snapshot load") for x in c)
@@ -112,17 +112,17 @@ class _Dev:
 
 
 def test_android_snapshot_load_keeps_the_other_apps(home, monkeypatch, capsys):
-    from atl_doctor import zustand
+    from atl_doctor import state
 
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     dev = _Dev({PKG: 1, "com.aurora.store": 76, "org.other": 5})
-    before = zustand._apps_kept(dev, PKG)
+    before = state._apps_kept(dev, PKG)
     assert before == {"com.aurora.store": 76, "org.other": 5}  # not the app the state belongs to
     dev.apps = {PKG: 1, "org.other": 5}  # the snapshot is older than the Aurora installation
-    zustand._reinstall_lost(dev, before)
+    state._reinstall_lost(dev, before)
     assert dev.apps["com.aurora.store"] == 76
     assert not any(c.startswith("install") and "org.other" in c for c in dev.calls)
     assert "com.aurora.store installed again" in capsys.readouterr().err
     n = len([c for c in dev.calls if c.startswith("pull")])
-    zustand._apps_kept(dev, PKG)  # the APKs are pulled once per version
+    state._apps_kept(dev, PKG)  # the APKs are pulled once per version
     assert len([c for c in dev.calls if c.startswith("pull")]) == n

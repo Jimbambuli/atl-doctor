@@ -103,7 +103,7 @@
       "on_android": false,
       "short_id": "df514dc0",
       "suggestion": "The process ended in another way (native exit, signal, crash of the runtime); see the crash findings and the log.",
-      "title": "Ende ohne System.exit/Runtime.exit erfasst (Exit-Hooks des Agenten: ohne Angabe)",
+      "title": "Ended without a System.exit/Runtime.exit call being seen (agent exit hooks: not reported)",
       "weight": 60,
       "weight_explained": {
         "android_penalty": 0,

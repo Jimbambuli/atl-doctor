@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from atl_doctor import android_input as ai
-from atl_doctor import bedienung as bd
+from atl_doctor import recorded_input as bd
 from atl_doctor.capture import Capture
 from atl_doctor.cli import main
 from atl_doctor.sources.exceptions import parse_agent_lines

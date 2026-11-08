@@ -14,6 +14,7 @@ from typing import Any, Callable
 from . import __version__
 from .env import Probe, resolve
 from .errors import EXIT_FOUND, DoctorError, UsageError
+from .sources.harmless import is_harmless, mark_harmless
 from .sources.perf import JANK_MIN_FRAMES
 from .findings import FIX_FIRST_MAX, RANK, Finding, Klass, from_dict, rank, to_dict
 
@@ -91,6 +92,42 @@ def _exception_side(f: Finding) -> str:
     if "android" in sides or f.on_android:
         return "both"
     return "only ATL"
+
+
+def _side_count(f: Finding, side: str) -> int:
+    return sum(o.count for o in f.occurrences if o.side == side)
+
+
+def exception_groups(ranked: list[Finding]) -> tuple[list[Finding], list[Finding], list[Finding]]:
+    """Caught exceptions as (shown in full, also on Android with comparable frequency, known harmless)."""
+    exc = [f for f in ranked if f.kind == "exc"]
+    harmless = [f for f in exc if is_harmless(f)]
+    rest = [f for f in exc if not is_harmless(f)]
+    android = [f for f in rest if _exception_side(f) == "both" and f.klass is Klass.OTHER]
+    return [f for f in rest if f not in android], android, harmless
+
+
+def _harmless_rules(harmless: list[Finding]) -> list[tuple[dict, int, int]]:
+    """Per rule: (entry, findings, ATL events), most events first."""
+    by: dict[str, list[Finding]] = {}
+    for f in harmless:
+        by.setdefault(f.details["known_harmless"]["id"], []).append(f)
+    out = [(fs[0].details["known_harmless"], len(fs), sum(_side_count(f, "atl") or f.total_count for f in fs)) for fs in by.values()]
+    return sorted(out, key=lambda x: (-x[2], x[0]["id"]))
+
+
+def _noise_lines(android: list[Finding], harmless: list[Finding]) -> list[str]:
+    lines: list[str] = []
+    if android:
+        n = sum(_side_count(f, "atl") for f in android)
+        lines.append(f"also on Android (comparable frequency, weight 0): {len(android)} findings, {n} events on ATL")
+        lines += [f"  {f.short_id}  {f.title}  [ATL {_side_count(f, 'atl')}x / Android {_side_count(f, 'android')}x]"
+                  for f in android]
+    if harmless:
+        rules = _harmless_rules(harmless)
+        lines.append(f"known harmless: {sum(c for _, _, c in rules)} events in {len(harmless)} findings ("
+                     + ", ".join(f"{k['id']} {c}x" for k, _, c in rules) + "); reasons and sources: HTML report, JSON details.known_harmless")
+    return lines
 
 
 def _environment_lines(r: Report) -> list[str]:
@@ -184,12 +221,13 @@ def render_text(r: Report) -> str:
             section(title, [ln for f in top for ln in finding_lines(f)])
         elif title == "Exceptions":
             lines: list[str] = []
+            shown, android, harmless = exception_groups(ranked)
             for side in ("only ATL", "both", "only Android"):
-                group = [f for f in ranked if f.kind == "exc" and _exception_side(f) == side]
+                group = [f for f in shown if _exception_side(f) == side]
                 if group:
                     lines.append(side)
                     lines += ["  " + ln for f in group for ln in finding_lines(f)]
-            section(title, lines)
+            section(title, lines + _noise_lines(android, harmless))
         else:
             section(title, [ln for f in ranked if pred(f) for ln in finding_lines(f)])
     if r.extras.get("steps"):
@@ -302,6 +340,18 @@ def render_html(r: Report, capture_dir: Path | None = None) -> str:
             section(title, "<ol>" + "".join(
                 f'<li><a href="#{_e(f.short_id)}">{_e(f.title)}</a> <span class="m">{f.weight}, {_e(f.short_id)}</span></li>'
                 for f in top) + "</ol>" if top else "")
+        elif title == "Exceptions":
+            shown, android, harmless = exception_groups(ranked)
+            inner = "".join(_html_finding(f, capture_dir) for f in shown)
+            if android:
+                inner += (f"<details><summary>Also on Android (comparable frequency, weight 0): {len(android)} findings</summary>"
+                          + "".join(_html_finding(f, capture_dir) for f in android) + "</details>")
+            if harmless:
+                rules = "".join(f'<li><code>{_e(k["id"])}</code> {c}x in {nf} findings: {_e(k["reason"])} '
+                                f'<span class="m">{_e(k["source"])}</span></li>' for k, nf, c in _harmless_rules(harmless))
+                inner += (f"<details><summary>Known harmless: {len(harmless)} findings</summary><ul>{rules}</ul>"
+                          + "".join(_html_finding(f, capture_dir) for f in harmless) + "</details>")
+            section(title, inner)
         else:
             section(title, "".join(_html_finding(f, capture_dir) for f in ranked if pred(f)))
     if r.extras.get("steps"):
@@ -474,7 +524,7 @@ def build_capture_report(path: Path, jank_min_frames: int = JANK_MIN_FRAMES) -> 
 
         notes.append(NOT_DETERMINABLE)
     probes = [Probe(p["name"], p["available"], p.get("reason", ""), p.get("hint", "")) for p in m.probes]
-    r = Report("record", env, probes, phases, findings)
+    r = Report("record", env, probes, phases, mark_harmless(findings))
     if notes:
         r.extras["limits"] = notes
     from .sources.stepstats import step_table
@@ -508,7 +558,7 @@ def build_pair_report(atl_dir: Path, android_dir: Path, density: float | None,
     if Capture.open(atl_dir).read_manifest().side != "atl" or am.side != "android":
         raise UsageError("report DIR ANDROID-DIR: the first must be an ATL capture, the second one from record --android")
     _, android = load_capture_findings(acap, None, set())
-    findings = compare_sides(r.findings, android)
+    findings = mark_harmless(compare_sides(r.findings, android))
     from .sources.render import android_ids
 
     same = android_ids(acap)   # a rendering defect that Android shows as well is not an ATL defect
@@ -614,6 +664,9 @@ def render_explain(f: Finding, r: Report, capture_dir: Path | None) -> str:
              f"{', minus 5 for Android' if f.on_android else ''})  seen: {f.total_count}x"]
     if f.suggestion:
         first += ["", "suggestion: " + f.suggestion]
+    if is_harmless(f):
+        k = f.details["known_harmless"]
+        first += ["", f"known harmless ({k['id']}): {k['reason']}", f"source: {k['source']}"]
     out = first + ["", "occurrences:"]
     out += [f"  {o.phase} [{o.side}]: {o.count}x{'  ' + o.where if o.where else ''}" for o in f.occurrences] or ["  -"]
     stack = f.details.get("stack")

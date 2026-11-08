@@ -63,7 +63,7 @@ class Finding:
 
     @property
     def weight(self) -> int:
-        return RANK[self.klass] - (ANDROID_PENALTY if self.on_android else 0)
+        return max(0, RANK[self.klass] - (ANDROID_PENALTY if self.on_android else 0))
 
     @property
     def total_count(self) -> int:

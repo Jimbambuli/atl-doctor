@@ -8,6 +8,10 @@ swallowed exceptions, view-tree differences, jank and memory growth, plus frames
 ranked by what to fix first. Behaves like a standard Linux command-line tool (text/JSON on stdout, exit codes,
 no prompts). The manual page is `atl-doctor(1)`.
 
+Noise in the exception list: exceptions that Android shows with a comparable frequency are summarised as "also on
+Android" (weight 0); caught exceptions that the platform code throws on purpose are summarised as "known harmless".
+The list with reason and AOSP source per entry is `atl_doctor/sources/harmless.py`; add an entry only with a source.
+
 **Status:** early (0.1). The recording side needs a Linux host with ATL; the Android side needs `adb` and a device or emulator.
 
 ## Installation

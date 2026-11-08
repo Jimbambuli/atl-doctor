@@ -500,6 +500,13 @@ def build_capture_report(path: Path, jank_min_frames: int = JANK_MIN_FRAMES) -> 
                              ("started", m.started), ("ended", m.ended), ("signal", m.signal)) if v}
     if m.exit_status is not None:
         env["exit"] = str(m.exit_status)
+    if m.side == "atl":
+        from .sources.windowclose import DETAIL_KEY, KEY, details, read, summary
+
+        wc = read(m.environment)
+        env[KEY] = summary(wc)
+        if details(wc):
+            env[DETAIL_KEY] = details(wc)
     if m.environment.get("trace"):
         env["trace"] = m.environment["trace"]
     if m.environment.get("tracecount"):

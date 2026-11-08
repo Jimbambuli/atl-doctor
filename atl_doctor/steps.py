@@ -568,6 +568,7 @@ class AtlDriver:
 
     def close_window(self) -> None:
         """Close the main window like the window manager's close button (close request to the app)."""
+        self.window_closed_at = time.monotonic()  # record measures from here whether the process ends
         self.session._script("for (const w of workspace.stackingOrder) if (w.normalWindow) { w.closeWindow(); break; }")
 
     def scroll(self, n: int) -> None:

@@ -1,0 +1,30 @@
+Environment
+  mode: record
+  phases: start, Import
+  package: org.example.demo
+  version_name: 1.0
+  apk: demo.apk
+  started: 2026-11-01T10:00:00+00:00
+  ended: 2026-11-01T10:01:00+00:00
+  Ends after window close: yes (1.2 s)
+  window close details: exit 0; remaining processes: none
+  agent: skipped 1 malformed lines
+
+Fix first
+  53ac4e33   60  fatal signal SIGSEGV  [1x, first: start]
+      -> Fix the crash first; later findings may be consequences.
+  ee23dbfa   60  uncaught java.lang.IllegalStateException: bad state N  [1x, first: Import]
+      -> Fix the crash first; later findings may be consequences.
+
+Exceptions
+  only ATL
+    286e960d    0  java.lang.NullPointerException: Attempt to read field X on null  [1x, first: start]
+
+Crashes
+  53ac4e33   60  fatal signal SIGSEGV  [1x, first: start]
+      -> Fix the crash first; later findings may be consequences.
+  ee23dbfa   60  uncaught java.lang.IllegalStateException: bad state N  [1x, first: Import]
+      -> Fix the crash first; later findings may be consequences.
+
+Exit cause
+  df514dc0    0  Ende ohne System.exit/Runtime.exit erfasst (Exit-Hooks des Agenten: ohne Angabe)  [1x, first: Import]

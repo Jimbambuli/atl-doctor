@@ -1,5 +1,6 @@
 {
   "environment": {
+    "Ends after window close": "not checked (no close-window step, or the run was stopped before the check)",
     "agent": "skipped 1 malformed lines",
     "apk": "demo.apk",
     "ended": "2026-11-01T10:01:00+00:00",
@@ -159,6 +160,7 @@
       "crash": 60,
       "exception-atl-only": 50,
       "jank": 10,
+      "lifecycle": 60,
       "memory-growth": 20,
       "missing": 60,
       "other": 0,

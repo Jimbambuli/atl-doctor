@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import errno
+import json
 import os
 import re
 import select
@@ -34,6 +35,7 @@ RUN_DIR = "run"  # private KWin session: socket, D-Bus address, logs, input help
 ARM_AFTER_S = 0.0
 TREE_WAIT_S = 30.0  # tree request (10 s) + screenshot of a mark sent by the last step
 STOP_GRACE_S = 10.0
+WINDOW_CLOSE_WAIT_S = 5.0  # ATL must end this soon after the close-window step
 TRACE_FILE = "trace.bin"
 AGENT_PATH_MAX = 480  # agent buffers hold 511 bytes: capture path + "/atl-doctor-..." file names
 TRACE_PREFIX = "tr"
@@ -243,7 +245,7 @@ def _start_steps(cap: Capture, driver, steps: list, filename: str) -> dict:
     """Run the steps in a thread; result["done"] when finished, result["error"] on failure."""
     from .steps import run_steps
 
-    result: dict = {}
+    result: dict = {"driver": driver}  # the driver knows when close-window started, even if the steps are still running
 
     def run() -> None:
         try:
@@ -423,11 +425,52 @@ def record_atl(opts: RecordOptions) -> int:
     return _finish(cap, m, rc, stop, steps_state, count_proc, trace_dir, out)
 
 
+def session_members(sid: int) -> list[dict]:
+    """Processes of session SID (ATL's own tree: it was started with start_new_session): PID and name only."""
+    out = []
+    for d in Path("/proc").iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            st = (d / "stat").read_text()
+        except OSError:
+            continue
+        name, _, rest = st[st.index("(") + 1:].rpartition(")")
+        f = rest.split()  # state ppid pgrp session ...
+        if len(f) > 3 and int(f[3]) == sid and f[0] != "Z":
+            out.append({"pid": int(d.name), "name": name})
+    return sorted(out, key=lambda e: e["pid"])
+
+
+def _measure_window_close(proc: subprocess.Popen, closed_at: float, ended_at: dict[str, float]) -> dict:
+    """Does ATL's process end within WINDOW_CLOSE_WAIT_S after the window was closed?"""
+    deadline = closed_at + WINDOW_CLOSE_WAIT_S
+    while "t" not in ended_at and time.monotonic() < deadline:
+        time.sleep(0.05)
+    out: dict = {"limit_s": WINDOW_CLOSE_WAIT_S, "ended": "t" in ended_at, "seconds": None, "exit": None,
+                 "signal": None, "remaining": session_members(proc.pid)}
+    if "t" in ended_at:
+        out["seconds"] = round(max(0.0, ended_at["t"] - closed_at), 1)
+        rc = proc.returncode
+        if rc is not None and rc < 0:
+            out["signal"] = _signal_name(rc)
+        else:
+            out["exit"] = rc
+    return out
+
+
 def _record_loop(cap: Capture, proc: subprocess.Popen, stop: _Stop, ctl: int, trees: bool, steps_state: dict,
                  session: HeadlessSession | None = None, memory: bool = True) -> int:
     """Until ATL ends, SIGINT/SIGTERM or the steps are done; serves the control FIFO meanwhile.
     memory: sample proc's memory per mark (not for a launcher: its process is not the app)."""
     started, buf = time.monotonic(), bytearray()
+    ended_at: dict[str, float] = {}  # when proc ended: the loop only looks every 0.2 s
+
+    def watch() -> None:
+        proc.wait()
+        ended_at["t"] = time.monotonic()
+
+    threading.Thread(target=watch, daemon=True).start()
     pending: list[threading.Thread] = []  # tree/screenshot requests of the marks
     while proc.poll() is None and stop.by is None and not steps_state.get("done"):
         if not cap.path(ARM_FILE).exists() and time.monotonic() - started >= ARM_AFTER_S:
@@ -455,6 +498,9 @@ def _record_loop(cap: Capture, proc: subprocess.Popen, stop: _Stop, ctl: int, tr
             t.join(TREE_WAIT_S)
     if memory and proc.poll() is None:
         _memory(cap, proc.pid, "end")
+    closed_at = getattr(steps_state.get("driver"), "window_closed_at", None)
+    if stop.by is None and isinstance(closed_at, float):
+        steps_state["window_close"] = _measure_window_close(proc, closed_at, ended_at)
     if stop.by is not None:
         _warn(f"{stop.by}: stopping ATL")
     if stop.by is not None or (steps_state.get("done") and proc.poll() is None):
@@ -487,6 +533,8 @@ def _finish(cap: Capture, m, rc: int, stop: _Stop, steps_state: dict, count_proc
         m.signal = _signal_name(rc)
     else:
         m.exit_status = rc
+    if steps_state.get("window_close"):
+        m.environment["window_close"] = json.dumps(steps_state["window_close"])
     cap.write_manifest(m)
     _warn(f"done: {out}")
     if steps_state.get("error"):

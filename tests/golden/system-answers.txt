@@ -3,6 +3,7 @@ Environment
   phases: start, start
   package: org.videolan.vlc
   ended: 2026-11-08T07:00:00+00:00
+  Ends after window close: not checked (no close-window step, or the run was stopped before the check)
 
 Fix first
   72a6476c   40  Receiver registered for android.net.conn.CONNECTIVITY_CHANGE, android.net.conn.CONNECTIVITY_CHANGE never delivered  [1x, first: start]

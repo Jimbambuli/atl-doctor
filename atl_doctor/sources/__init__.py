@@ -11,6 +11,7 @@ from .render import render_findings
 from .perf import JANK_MIN_FRAMES, atl_frame_intervals, perf_findings
 from .stubs import StubEntry
 from .sysanswers import broadcast_findings
+from .windowclose import window_close_findings
 from .trace import read_counter_output, read_stub_hits, stub_findings
 
 TRACE_PREFIX = "tr"  # trace/tr.methods, trace/tr.counts ...
@@ -57,6 +58,8 @@ def load_capture_findings(cap: Capture, entries: list[StubEntry] | None,
                              SUGGEST_CRASH, list(end)))
     if m.side == "atl" and m.ended is not None:
         found += exit_findings(events, m.exit_status, m.signal, marks, m.side)
+    if m.side == "atl" and last:
+        found += window_close_findings(m.environment, last.name, last.index, m.side)
     if m.ended is None:
         found.append(Finding("crash", "aborted-recording", Klass.OTHER, "recording did not finish cleanly",
                              "The recording was interrupted; data up to that point is shown.", list(end)))

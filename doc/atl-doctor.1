@@ -71,6 +71,11 @@ The report's \fBExit cause\fR section then names the first call: the exit status
 the stack and the last five exceptions before it. If the process ended without such a call, the finding says
 "Ende ohne System.exit/Runtime.exit erfasst" and gives the process's exit status or signal.
 .PP
+When a \fBclose\-window\fR step ran, \fBrecord\fR measures whether ATL's process ends within 5 s. The environment
+section always has the line "Ends after window close": "yes (1.2 s)", "no (still running after 5 s)" or "not checked"
+(no close-window step, or the run was stopped first). Below it the exit status or signal and the processes of ATL's
+own session (PID and name only) are listed. "no" is a finding of class \fBlifecycle\fR (weight 60, like a crash).
+.PP
 At every mark the agent asks the system what the app would be told (agent option \fBnosys\fR turns that off): the
 active network and its transports and capabilities, the active NetworkInfo, a fixed list of PackageManager features
 and packages (present or not), the display size and density, and the number of accounts (never their names).

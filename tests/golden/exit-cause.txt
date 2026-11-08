@@ -7,6 +7,7 @@ Environment
   started: 2026-11-01T10:00:00+00:00
   ended: 2026-11-01T10:01:00+00:00
   exit: 10
+  Ends after window close: not checked (no close-window step, or the run was stopped before the check)
 
 Fix first
   53ac4e33   60  fatal signal SIGSEGV  [1x, first: start]

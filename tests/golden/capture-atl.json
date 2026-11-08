@@ -164,6 +164,7 @@
       "other": 0,
       "render": 30,
       "stub-result-used": 40,
+      "system-answer": 40,
       "tree-visible": 30
     },
     "rule": "class rank, minus 5 if also on Android; then count desc, earliest phase, id"

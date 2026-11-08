@@ -11,8 +11,8 @@ from ..findings import Finding, Klass, Occurrence, normalize_text
 from .log import SUGGEST_CRASH, is_platform_frame
 
 # columns per line tag, including tag and time; tags in WITH_TID have the thread id as third column
-COLUMNS = {"E": 7, "L": 9, "I": 4, "P": 5, "G": 3, "H": 5, "M": 6, "C": 6, "X": 7, "R": 7}
-WITH_TID = {"E", "L", "I", "H", "X", "R"}
+COLUMNS = {"E": 7, "L": 9, "I": 4, "P": 5, "G": 3, "H": 5, "M": 6, "C": 6, "X": 7, "R": 7, "Q": 5, "B": 7}
+WITH_TID = {"E", "L", "I", "H", "X", "R", "B"}
 
 
 @dataclass
@@ -166,6 +166,8 @@ def compare_sides(atl: list[Finding], android: list[Finding]) -> list[Finding]:
             n_and = sum(o.count for o in f.occurrences if o.side == "android")
             if f.kind == "exc" and n_atl >= ATL_ONLY_FACTOR * n_and:
                 f.klass = Klass.EXC_ATL_ONLY
+            if f.kind == "bcast":   # not delivered on Android either: nothing ATL does wrong
+                f.klass = Klass.OTHER
         elif f.kind == "exc":
             f.klass = Klass.EXC_ATL_ONLY
         out.append(f)

@@ -10,6 +10,7 @@ from .memory import memory_findings
 from .render import render_findings
 from .perf import JANK_MIN_FRAMES, atl_frame_intervals, perf_findings
 from .stubs import StubEntry
+from .sysanswers import broadcast_findings
 from .trace import read_counter_output, read_stub_hits, stub_findings
 
 TRACE_PREFIX = "tr"  # trace/tr.methods, trace/tr.counts ...
@@ -40,6 +41,7 @@ def load_capture_findings(cap: Capture, entries: list[StubEntry] | None,
         exc = exception_findings(events, marks, m.side)
         agent_ids = {f.id for f in exc}
         found += exc
+        found += broadcast_findings(events, marks, m.side, notes if m.side == "atl" else None)
         if m.side == "atl":  # Android frame times are only for comparison (report DIR ANDROID-DIR)
             found += perf_findings(atl_frame_intervals(events, marks), None, [e for e in events if e.tag == "H"],
                                    [e for e in events if e.tag == "G"], marks, jank_min_frames, notes)

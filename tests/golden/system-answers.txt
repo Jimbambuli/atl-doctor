@@ -1,0 +1,46 @@
+Environment
+  mode: record
+  phases: start, start
+  package: org.videolan.vlc
+  ended: 2026-11-08T07:00:00+00:00
+
+Fix first
+  72a6476c   40  Receiver registered for android.net.conn.CONNECTIVITY_CHANGE, android.net.conn.CONNECTIVITY_CHANGE never delivered  [1x, first: start]
+      -> Android delivered it 1x in the same run; ATL registered the receiver but never sent the broadcast.
+  0b5af2bb   40  connectivity.activeNetwork: ATL null, Android present  [1x, first: start]
+      -> The app sees a different answer from the system than on Android.
+  7c935c27   40  connectivity.activeNetworkInfo: ATL null, Android type=1 connected=true  [1x, first: start]
+      -> The app sees a different answer from the system than on Android.
+  ecb22859   40  connectivity.transports: ATL none, Android WIFI  [1x, first: start]
+      -> The app sees a different answer from the system than on Android.
+  a47ad7ce   40  pm.feature:android.hardware.touchscreen: ATL false, Android true  [1x, first: start]
+      -> The app sees a different answer from the system than on Android.
+  9c7885f8   40  pm.package:com.google.android.gms: ATL missing, Android found  [1x, first: start]
+      -> The app sees a different answer from the system than on Android.
+
+Exit cause
+  df514dc0    0  Ende ohne System.exit/Runtime.exit erfasst  [1x, first: start]
+
+System answers differ
+  0b5af2bb   40  connectivity.activeNetwork: ATL null, Android present  [1x, first: start]
+      -> The app sees a different answer from the system than on Android.
+  7c935c27   40  connectivity.activeNetworkInfo: ATL null, Android type=1 connected=true  [1x, first: start]
+      -> The app sees a different answer from the system than on Android.
+  ecb22859   40  connectivity.transports: ATL none, Android WIFI  [1x, first: start]
+      -> The app sees a different answer from the system than on Android.
+  a47ad7ce   40  pm.feature:android.hardware.touchscreen: ATL false, Android true  [1x, first: start]
+      -> The app sees a different answer from the system than on Android.
+  9c7885f8   40  pm.package:com.google.android.gms: ATL missing, Android found  [1x, first: start]
+      -> The app sees a different answer from the system than on Android.
+  0dfdc4ad    0  display.metrics: ATL 1200x850@160dpi, Android 1080x2400@420dpi  [1x, first: start]
+      -> Depends on the device and window; shown for completeness.
+
+Broadcasts registered, never delivered
+  72a6476c   40  Receiver registered for android.net.conn.CONNECTIVITY_CHANGE, android.net.conn.CONNECTIVITY_CHANGE never delivered  [1x, first: start]
+      -> Android delivered it 1x in the same run; ATL registered the receiver but never sent the broadcast.
+  bb77e95f    0  Receiver registered for android.intent.action.SCREEN_OFF, android.intent.action.SCREEN_OFF never delivered  [2x, first: start]
+      -> The app waits for this broadcast. If ATL is supposed to send it, it does not; compare with an Android recording (record --android).
+
+Notes
+  Broadcast actions could not be read for 1 register/deliver calls (ART refused the argument); they are not counted.
+  System answers (Q lines) are asked by the agent itself through the Application, not recorded from the app's own calls; the connectivity answer is the one at each mark, the report compares the last one.

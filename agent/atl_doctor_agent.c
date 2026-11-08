@@ -11,6 +11,7 @@
  *   or late=PLUGIN (see below).
  *   opt: noex          no exceptions
  *        nolc          no lifecycle
+ *        nosys         no system answers (Q lines at every mark) and no broadcast hooks (B lines)
  *        noexit        no exit hooks (breakpoints in System.exit, Runtime.exit, Runtime.halt)
  *        arm=FILE      set the lifecycle breakpoints only once FILE exists (breakpoints right at start make some
  *                      apps lose start-up races; exceptions are recorded from the start anyway)
@@ -51,6 +52,18 @@
  *   R  t tid type thread catcher|UNCAUGHT first_app_frame|-   written right after the first X line: the last
  *        5 exceptions before it (oldest first), t = when thrown, first_app_frame = first frame outside the boot classes
  *   I line "exit hooks 3" says the three breakpoints are set
+ *   Q  t mark_index query value   what the system answers the app at every new line of marks=FILE: the agent asks
+ *        itself through the Application (ActivityThread.currentApplication), the app's own calls are not recorded.
+ *        query: connectivity.activeNetwork (null|present), connectivity.transports / .capabilities of that network,
+ *        connectivity.activeNetworkInfo (type, connected), pm.feature:NAME (true|false), pm.package:NAME (found|
+ *        missing), display.metrics (WxH@DPI), accounts.count / accounts.count:TYPE (number only, no names),
+ *        sticky:ACTION (registerReceiver(null, filter): present or null).
+ *        value: "null", "no such method", "exception:TYPE" or the answer
+ *   B  t tid kind actions receiver_class receiver_hash   kind = register (registerReceiver called, actions = the
+ *        filter's actions, comma separated), deliver (onReceive called, actions = the intent's action, "-" if none)
+ *        or early (ATL only: receiver registered before the breakpoints were set, read from Context.receiverMap;
+ *        deliveries before that are not seen either).
+ *        Needs the lifecycle breakpoints (not with nolc); "?" when ART refuses to read the argument
  */
 #define _GNU_SOURCE
 #include <jvmti.h>
@@ -68,7 +81,7 @@
 
 static jvmtiEnv *J;
 static int32_t out_fd = -1;
-static uint8_t opt_ex = 1, opt_lc = 1, opt_exit = 1;
+static uint8_t opt_ex = 1, opt_lc = 1, opt_exit = 1, opt_sys = 1;
 static volatile uint8_t lc_active;
 static char opt_arm[512], opt_late[512], opt_marks[512];
 static uint32_t opt_latesec = 20;
@@ -110,6 +123,7 @@ static void info(const char *fmt, const char *a) {
 static void start_agent_thread(JNIEnv *jni, const char *name, jvmtiStartFunction fn);
 static void JNICALL hang_watchdog(jvmtiEnv *je, JNIEnv *jni, void *arg);
 static void JNICALL marks_watcher(jvmtiEnv *je, JNIEnv *jni, void *arg);
+static void sys_probe(JNIEnv *jni, uint32_t mark);
 
 /* ---------- method cache: jmethodID -> "pkg.Class.name" ---------- */
 #define MC_N 262144
@@ -286,7 +300,7 @@ static void set_exit_hooks(JNIEnv *jni) {
 }
 
 /* ---------- lifecycle via breakpoints ---------- */
-enum { G_ACT = 1, G_WIN = 2, G_FRAG = 4, G_VIEW = 8 };
+enum { G_ACT = 1, G_WIN = 2, G_FRAG = 4, G_VIEW = 8, G_REG = 16, G_RCV = 32 };
 static const char *n_act[] = { "onCreate", "onStart", "onRestart", "onResume", "onPostCreate", "onPostResume", "onPause",
 	"onStop", "onDestroy", "onConfigurationChanged", "onSaveInstanceState", "onRestoreInstanceState", "onNewIntent",
 	"onUserLeaveHint", "onTopResumedActivityChanged", "onMultiWindowModeChanged", "onBackPressed", NULL };
@@ -309,7 +323,9 @@ static int32_t bp_find(jmethodID m) {
 	for (uint32_t k = 0; k < BP_N; k++) { uint32_t i = (uint32_t)(h + k) & (BP_N - 1); if (bp_m[i] == m || bp_m[i] == NULL) return (int32_t)i; }
 	return -1;
 }
-static jclass k_activity, k_wincb, k_fragment, k_view;   /* global refs once loaded */
+static jclass k_activity, k_wincb, k_fragment, k_view, k_context, k_receiver;   /* global refs once loaded */
+static void bcast_hit(JNIEnv *jni, jthread th, jmethodID m, uint8_t g);
+static void scan_early_receivers(JNIEnv *jni);
 
 static void JNICALL cb_breakpoint(jvmtiEnv *je, JNIEnv *jni, jthread th, jmethodID m, jlocation loc) {
 	(void)je; (void)loc;
@@ -320,6 +336,7 @@ static void JNICALL cb_breakpoint(jvmtiEnv *je, JNIEnv *jni, jthread th, jmethod
 	pthread_mutex_lock(&bp_lock);
 	int32_t i = bp_find(m); uint8_t g = (i >= 0 && bp_m[i] == m) ? bp_g[i] : 0;
 	pthread_mutex_unlock(&bp_lock);
+	if (g & (G_REG | G_RCV)) { bcast_hit(jni, th, m, g); in_callback = 0; return; }
 	jvmtiFrameInfo fr[2]; jint cnt = 0;
 	(*J)->GetStackTrace(J, th, 0, 2, fr, &cnt);
 	struct mc *e0 = method(m), *e1 = cnt > 1 ? method(fr[1].method) : NULL;
@@ -375,6 +392,8 @@ static void check_class(JNIEnv *jni, jclass k) {
 	if (!k_wincb && !strcmp(s, "Landroid/view/Window$Callback;")) k_wincb = (*jni)->NewGlobalRef(jni, k);
 	if (!k_fragment && !strcmp(s, "Landroidx/fragment/app/Fragment;")) k_fragment = (*jni)->NewGlobalRef(jni, k);
 	if (!k_view && !strcmp(s, "Landroid/view/View;")) k_view = (*jni)->NewGlobalRef(jni, k);
+	if (opt_sys && !k_context && !strcmp(s, "Landroid/content/Context;")) k_context = (*jni)->NewGlobalRef(jni, k);
+	if (opt_sys && !k_receiver && !strcmp(s, "Landroid/content/BroadcastReceiver;")) k_receiver = (*jni)->NewGlobalRef(jni, k);
 	(*J)->Deallocate(J, (unsigned char *)s);
 	/* no breakpoints in interfaces (Window$Callback itself): a breakpoint in a default method makes ART deoptimize
 	   every method of the runtime (DeoptManager::AddMethodBreakpoint), the app then runs interpreted (JW Library:
@@ -388,6 +407,8 @@ static void check_class(JNIEnv *jni, jclass k) {
 	/* View only in the base class: a breakpoint in every subclass costs a deoptimization each and makes ATL so
 	   slow that apps lose start-up races */
 	if (k_view && (*jni)->IsSameObject(jni, k, k_view)) g |= G_VIEW;
+	if (opt_sys && is_subclass(jni, k, k_context)) g |= G_REG;
+	if (opt_sys && is_subclass(jni, k, k_receiver)) g |= G_RCV;
 	if (!g) return;
 	jint mn = 0; jmethodID *ms = NULL;
 	if ((*J)->GetClassMethods(J, k, &mn, &ms) != JVMTI_ERROR_NONE) return;
@@ -404,6 +425,14 @@ static void check_class(JNIEnv *jni, jclass k) {
 		struct mc *e = method(ms[i]);
 		if (!e) continue;
 		uint8_t mg = 0;
+		if (g & (G_REG | G_RCV)) {
+			char *sg = NULL; (*J)->GetMethodName(J, ms[i], NULL, &sg, NULL);
+			if (sg) {
+				if ((g & G_REG) && !strcmp(e->name, "registerReceiver") && !strncmp(sg, "(Landroid/content/BroadcastReceiver;Landroid/content/IntentFilter;", 64)) mg |= G_REG;
+				if ((g & G_RCV) && !strcmp(e->name, "onReceive") && !strcmp(sg, "(Landroid/content/Context;Landroid/content/Intent;)V")) mg |= G_RCV;
+				(*J)->Deallocate(J, (unsigned char *)sg);
+			}
+		}
 		if ((g & G_ACT) && in_list(n_act, e->name)) mg |= G_ACT;
 		if ((g & G_WIN) && in_list(n_win, e->name)) mg |= G_WIN;
 		if ((g & G_FRAG) && in_list(n_frag, e->name)) mg |= G_FRAG;
@@ -437,7 +466,8 @@ static void arm(JNIEnv *jni) {
 			if (pass == 0) {
 				char *s = NULL; (*J)->GetClassSignature(J, ks[i], &s, NULL);
 				if (s && (!strcmp(s, "Landroid/app/Activity;") || !strcmp(s, "Landroid/view/Window$Callback;")
-				          || !strcmp(s, "Landroid/view/View;") || !strcmp(s, "Landroidx/fragment/app/Fragment;")))
+				          || !strcmp(s, "Landroid/view/View;") || !strcmp(s, "Landroidx/fragment/app/Fragment;")
+				          || !strcmp(s, "Landroid/content/Context;") || !strcmp(s, "Landroid/content/BroadcastReceiver;")))
 					check_class(jni, ks[i]);
 				if (s) (*J)->Deallocate(J, (unsigned char *)s);
 			} else {
@@ -448,6 +478,7 @@ static void arm(JNIEnv *jni) {
 	in_callback = old;
 	if (ks) { for (jint i = 0; i < n; i++) (*jni)->DeleteLocalRef(jni, ks[i]); (*J)->Deallocate(J, (unsigned char *)ks); }
 	char z[64]; snprintf(z, sizeof z, "%u", bp_count); info("armed, breakpoints %s", z);
+	if (opt_sys) scan_early_receivers(jni);
 }
 /* arm=FILE: set the lifecycle breakpoints only once FILE exists (own agent thread) */
 static void JNICALL wait_for_arm(jvmtiEnv *je, JNIEnv *jni, void *arg) {
@@ -706,6 +737,307 @@ static void memory_line(JNIEnv *jni, uint32_t mark) {
 	emit(b, (size_t)len);
 }
 /* every complete new line of the marks file: index\tboot_us\twall_us\tname */
+/* ---------- system answers (Q lines) and broadcasts (B lines) ---------- */
+static uint8_t jexc(JNIEnv *jni, char *name, size_t n) {   /* pending exception -> short class name, cleared */
+	name[0] = 0;
+	if (!(*jni)->ExceptionCheck(jni)) return 0;
+	jthrowable t = (*jni)->ExceptionOccurred(jni);
+	(*jni)->ExceptionClear(jni);
+	if (t) {
+		jclass k = (*jni)->GetObjectClass(jni, t); char full[160]; class_name(k, full, sizeof full);
+		const char *dot = full; for (const char *c = full; *c; c++) if (*c == '.' || *c == '$') dot = c + 1;
+		snprintf(name, n, "%s", dot);
+		(*jni)->DeleteLocalRef(jni, k); (*jni)->DeleteLocalRef(jni, t);
+	} else snprintf(name, n, "?");
+	return 1;
+}
+static jmethodID jmid(JNIEnv *jni, jobject o, const char *name, const char *sig) {
+	jclass k = (*jni)->GetObjectClass(jni, o);
+	jmethodID m = (*jni)->GetMethodID(jni, k, name, sig);
+	(*jni)->DeleteLocalRef(jni, k);
+	if (!m) (*jni)->ExceptionClear(jni);
+	return m;
+}
+/* call a method; kind 'L' object, 'I' int, 'Z' boolean. st is "" when the call went well, else the reason */
+static jvalue jcall(JNIEnv *jni, jobject o, char kind, const char *name, const char *sig, const jvalue *a, char *st, size_t sn) {
+	jvalue r; memset(&r, 0, sizeof r); st[0] = 0;
+	jmethodID m = jmid(jni, o, name, sig);
+	if (!m) { snprintf(st, sn, "no such method"); return r; }
+	if (kind == 'L') r.l = (*jni)->CallObjectMethodA(jni, o, m, a);
+	else if (kind == 'I') r.i = (*jni)->CallIntMethodA(jni, o, m, a);
+	else r.z = (*jni)->CallBooleanMethodA(jni, o, m, a);
+	char en[80];
+	if (jexc(jni, en, sizeof en)) { snprintf(st, sn, "exception:%s", en); memset(&r, 0, sizeof r); }
+	return r;
+}
+static void jstring_of(JNIEnv *jni, jobject s, char *o, size_t on) {
+	o[0] = 0;
+	if (!s) return;
+	const char *u = (*jni)->GetStringUTFChars(jni, (jstring)s, NULL);
+	if (u) { clean(o, on, u); (*jni)->ReleaseStringUTFChars(jni, (jstring)s, u); }
+}
+static void qline(uint32_t mark, const char *query, const char *value) {
+	char b[1024], v[400];
+	clean(v, sizeof v, value);
+	int32_t n = snprintf(b, sizeof b, "Q\t%lld\t%u\t%s\t%s\n", (long long)now_us(), mark, query, v);
+	if (n > (int32_t)sizeof b - 1) { n = sizeof b - 1; b[n - 1] = '\n'; }
+	emit(b, (size_t)n);
+}
+static jclass k_activitythread;
+static jclass find_loaded(JNIEnv *jni, const char *sig) {
+	jint n = 0; jclass *ks = NULL, found = NULL;
+	if ((*J)->GetLoadedClasses(J, &n, &ks) != JVMTI_ERROR_NONE) return NULL;
+	for (jint i = 0; i < n && !found; i++) {
+		char *s = NULL;
+		if ((*J)->GetClassSignature(J, ks[i], &s, NULL) == JVMTI_ERROR_NONE && s) {
+			if (!strcmp(s, sig)) found = (*jni)->NewGlobalRef(jni, ks[i]);
+			(*J)->Deallocate(J, (unsigned char *)s);
+		}
+	}
+	for (jint i = 0; i < n; i++) (*jni)->DeleteLocalRef(jni, ks[i]);
+	(*J)->Deallocate(J, (unsigned char *)ks);
+	return found;
+}
+static jobject sysservice(JNIEnv *jni, jobject app, const char *name) {
+	char st[96]; jvalue a; a.l = (*jni)->NewStringUTF(jni, name);
+	jvalue r = jcall(jni, app, 'L', "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;", &a, st, sizeof st);
+	(*jni)->DeleteLocalRef(jni, a.l);
+	return st[0] ? NULL : r.l;
+}
+static void probe_net(JNIEnv *jni, jobject app, uint32_t mark) {
+	char st[96], v[300];
+	jobject cm = sysservice(jni, app, "connectivity");
+	if (!cm) { qline(mark, "connectivity.service", "null"); return; }
+	jvalue none[1]; memset(none, 0, sizeof none);
+	jvalue r = jcall(jni, cm, 'L', "getActiveNetwork", "()Landroid/net/Network;", none, st, sizeof st);
+	qline(mark, "connectivity.activeNetwork", st[0] ? st : r.l ? "present" : "null");
+	if (r.l && !st[0]) {
+		jvalue a; a.l = r.l;
+		jvalue c = jcall(jni, cm, 'L', "getNetworkCapabilities", "(Landroid/net/Network;)Landroid/net/NetworkCapabilities;", &a, st, sizeof st);
+		if (st[0]) { qline(mark, "connectivity.transports", st); qline(mark, "connectivity.capabilities", st); }
+		else if (!c.l) { qline(mark, "connectivity.transports", "null"); qline(mark, "connectivity.capabilities", "null"); }
+		else {
+			static const char *tn[] = { "CELLULAR", "WIFI", "BLUETOOTH", "ETHERNET", "VPN", "WIFI_AWARE", "LOWPAN", "TEST", "USB", "THREAD" };
+			static const struct { jint id; const char *name; } cn[] = { { 12, "INTERNET" }, { 16, "VALIDATED" }, { 11, "NOT_METERED" }, { 18, "NOT_ROAMING" } };
+			size_t n = 0; v[0] = 0;
+			for (jint t = 0; t < 10; t++) {
+				jvalue ta; ta.i = t;
+				jvalue h = jcall(jni, c.l, 'Z', "hasTransport", "(I)Z", &ta, st, sizeof st);
+				if (st[0]) { snprintf(v, sizeof v, "%s", st); n = strlen(v); break; }
+				if (h.z) n += (size_t)snprintf(v + n, sizeof v - n, "%s%s", n ? "," : "", tn[t]);
+			}
+			qline(mark, "connectivity.transports", n ? v : "none");
+			n = 0; v[0] = 0;
+			for (uint32_t i = 0; i < sizeof cn / sizeof cn[0]; i++) {
+				jvalue ca; ca.i = cn[i].id;
+				jvalue h = jcall(jni, c.l, 'Z', "hasCapability", "(I)Z", &ca, st, sizeof st);
+				if (st[0]) { snprintf(v, sizeof v, "%s", st); n = strlen(v); break; }
+				if (h.z) n += (size_t)snprintf(v + n, sizeof v - n, "%s%s", n ? "," : "", cn[i].name);
+			}
+			qline(mark, "connectivity.capabilities", n ? v : "none");
+			(*jni)->DeleteLocalRef(jni, c.l);
+		}
+		(*jni)->DeleteLocalRef(jni, r.l);
+	}
+	jvalue ni = jcall(jni, cm, 'L', "getActiveNetworkInfo", "()Landroid/net/NetworkInfo;", none, st, sizeof st);
+	if (st[0]) qline(mark, "connectivity.activeNetworkInfo", st);
+	else if (!ni.l) qline(mark, "connectivity.activeNetworkInfo", "null");
+	else {
+		jvalue ty = jcall(jni, ni.l, 'I', "getType", "()I", none, st, sizeof st);
+		jvalue co = jcall(jni, ni.l, 'Z', "isConnected", "()Z", none, st, sizeof st);
+		snprintf(v, sizeof v, "type=%d connected=%s", (int)ty.i, co.z ? "true" : "false");
+		qline(mark, "connectivity.activeNetworkInfo", v);
+		(*jni)->DeleteLocalRef(jni, ni.l);
+	}
+	(*jni)->DeleteLocalRef(jni, cm);
+}
+static void probe_pm(JNIEnv *jni, jobject app, uint32_t mark) {
+	static const char *features[] = { "android.hardware.touchscreen", "android.hardware.wifi", "android.hardware.camera",
+		"android.hardware.bluetooth", "android.hardware.telephony", "android.hardware.location.gps", "android.hardware.microphone",
+		"android.hardware.sensor.accelerometer", "android.software.leanback", "android.hardware.type.television",
+		"android.software.webview", NULL };
+	static const char *others[] = { "com.google.android.gms", "com.android.vending", "com.google.android.webview",
+		"com.android.chrome", NULL };
+	char st[96], key[200], own[200] = "";
+	jvalue none[1]; memset(none, 0, sizeof none);
+	jvalue pm = jcall(jni, app, 'L', "getPackageManager", "()Landroid/content/pm/PackageManager;", none, st, sizeof st);
+	if (st[0] || !pm.l) { qline(mark, "pm.service", st[0] ? st : "null"); return; }
+	for (uint32_t i = 0; features[i]; i++) {
+		jvalue a; a.l = (*jni)->NewStringUTF(jni, features[i]);
+		jvalue r = jcall(jni, pm.l, 'Z', "hasSystemFeature", "(Ljava/lang/String;)Z", &a, st, sizeof st);
+		snprintf(key, sizeof key, "pm.feature:%s", features[i]);
+		qline(mark, key, st[0] ? st : r.z ? "true" : "false");
+		(*jni)->DeleteLocalRef(jni, a.l);
+	}
+	jvalue pn = jcall(jni, app, 'L', "getPackageName", "()Ljava/lang/String;", none, st, sizeof st);
+	if (!st[0]) jstring_of(jni, pn.l, own, sizeof own);
+	const char *pk[8]; uint32_t np = 0;
+	if (own[0]) pk[np++] = own;
+	for (uint32_t i = 0; others[i]; i++) pk[np++] = others[i];
+	for (uint32_t i = 0; i < np; i++) {
+		jvalue a[2]; a[0].l = (*jni)->NewStringUTF(jni, pk[i]); a[1].i = 0;
+		jvalue r = jcall(jni, pm.l, 'L', "getPackageInfo", "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;", a, st, sizeof st);
+		snprintf(key, sizeof key, "pm.package:%s", pk[i]);
+		qline(mark, key, !st[0] ? (r.l ? "found" : "null") : !strcmp(st, "exception:NameNotFoundException") ? "missing" : st);
+		if (r.l) (*jni)->DeleteLocalRef(jni, r.l);
+		(*jni)->DeleteLocalRef(jni, a[0].l);
+	}
+	(*jni)->DeleteLocalRef(jni, pm.l);
+}
+static void probe_display(JNIEnv *jni, jobject app, uint32_t mark) {
+	char st[96], v[120]; jvalue none[1]; memset(none, 0, sizeof none);
+	jvalue res = jcall(jni, app, 'L', "getResources", "()Landroid/content/res/Resources;", none, st, sizeof st);
+	if (st[0] || !res.l) { qline(mark, "display.metrics", st[0] ? st : "null"); return; }
+	jvalue dm = jcall(jni, res.l, 'L', "getDisplayMetrics", "()Landroid/util/DisplayMetrics;", none, st, sizeof st);
+	if (st[0] || !dm.l) qline(mark, "display.metrics", st[0] ? st : "null");
+	else {
+		jclass k = (*jni)->GetObjectClass(jni, dm.l);
+		jfieldID fw = (*jni)->GetFieldID(jni, k, "widthPixels", "I"), fh = (*jni)->GetFieldID(jni, k, "heightPixels", "I"),
+		         fd = (*jni)->GetFieldID(jni, k, "densityDpi", "I");
+		if (!fw || !fh || !fd) { (*jni)->ExceptionClear(jni); qline(mark, "display.metrics", "no such field"); }
+		else {
+			snprintf(v, sizeof v, "%dx%d@%ddpi", (int)(*jni)->GetIntField(jni, dm.l, fw), (int)(*jni)->GetIntField(jni, dm.l, fh),
+			         (int)(*jni)->GetIntField(jni, dm.l, fd));
+			qline(mark, "display.metrics", v);
+		}
+		(*jni)->DeleteLocalRef(jni, k); (*jni)->DeleteLocalRef(jni, dm.l);
+	}
+	(*jni)->DeleteLocalRef(jni, res.l);
+}
+static void probe_accounts(JNIEnv *jni, jobject app, uint32_t mark) {
+	char st[96], v[40]; jvalue none[1]; memset(none, 0, sizeof none);
+	jobject am = sysservice(jni, app, "account");
+	if (!am) { qline(mark, "accounts.count", "null"); return; }
+	jvalue r = jcall(jni, am, 'L', "getAccounts", "()[Landroid/accounts/Account;", none, st, sizeof st);
+	if (st[0]) qline(mark, "accounts.count", st);
+	else { snprintf(v, sizeof v, "%d", r.l ? (int)(*jni)->GetArrayLength(jni, (jarray)r.l) : -1); qline(mark, "accounts.count", v); }
+	if (r.l) (*jni)->DeleteLocalRef(jni, r.l);
+	jvalue a; a.l = (*jni)->NewStringUTF(jni, "com.google");
+	r = jcall(jni, am, 'L', "getAccountsByType", "(Ljava/lang/String;)[Landroid/accounts/Account;", &a, st, sizeof st);
+	if (st[0]) qline(mark, "accounts.count:com.google", st);
+	else { snprintf(v, sizeof v, "%d", r.l ? (int)(*jni)->GetArrayLength(jni, (jarray)r.l) : -1); qline(mark, "accounts.count:com.google", v); }
+	if (r.l) (*jni)->DeleteLocalRef(jni, r.l);
+	(*jni)->DeleteLocalRef(jni, a.l); (*jni)->DeleteLocalRef(jni, am);
+}
+/* registerReceiver(null, filter) answers with the sticky broadcast of the system, null if there is none */
+static jclass k_intentfilter;
+static void probe_sticky(JNIEnv *jni, jobject app, uint32_t mark) {
+	static const char *actions[] = { "android.net.conn.CONNECTIVITY_CHANGE", "android.intent.action.BATTERY_CHANGED", NULL };
+	if (!k_intentfilter) k_intentfilter = find_loaded(jni, "Landroid/content/IntentFilter;");
+	jmethodID ctor = k_intentfilter ? (*jni)->GetMethodID(jni, k_intentfilter, "<init>", "(Ljava/lang/String;)V") : NULL;
+	if (!ctor) { (*jni)->ExceptionClear(jni); return; }
+	for (uint32_t i = 0; actions[i]; i++) {
+		char st[96], key[200];
+		jstring a = (*jni)->NewStringUTF(jni, actions[i]);
+		jobject filter = (*jni)->NewObject(jni, k_intentfilter, ctor, a);
+		(*jni)->DeleteLocalRef(jni, a);
+		if (!filter) { (*jni)->ExceptionClear(jni); continue; }
+		jvalue args[2]; args[0].l = NULL; args[1].l = filter;
+		jvalue r = jcall(jni, app, 'L', "registerReceiver", "(Landroid/content/BroadcastReceiver;Landroid/content/IntentFilter;)Landroid/content/Intent;", args, st, sizeof st);
+		snprintf(key, sizeof key, "sticky:%s", actions[i]);
+		qline(mark, key, st[0] ? st : r.l ? "present" : "null");
+		if (r.l) (*jni)->DeleteLocalRef(jni, r.l);
+		(*jni)->DeleteLocalRef(jni, filter);
+	}
+}
+static void sys_probe(JNIEnv *jni, uint32_t mark) {
+	if (!k_activitythread) k_activitythread = find_loaded(jni, "Landroid/app/ActivityThread;");
+	jmethodID m = k_activitythread ? (*jni)->GetStaticMethodID(jni, k_activitythread, "currentApplication", "()Landroid/app/Application;") : NULL;
+	if (!m) { (*jni)->ExceptionClear(jni); qline(mark, "application", "no ActivityThread.currentApplication"); return; }
+	jobject app = (*jni)->CallStaticObjectMethod(jni, k_activitythread, m);
+	char en[80];
+	if (jexc(jni, en, sizeof en)) { qline(mark, "application", en); return; }
+	if (!app) { qline(mark, "application", "null"); return; }
+	probe_net(jni, app, mark); probe_pm(jni, app, mark); probe_display(jni, app, mark); probe_accounts(jni, app, mark); probe_sticky(jni, app, mark);
+	(*jni)->DeleteLocalRef(jni, app);
+}
+
+/* registerReceiver and onReceive hit a breakpoint: B line with the actions */
+static jint arg_slot(jmethodID m, jint idx) {
+	jint ml = 0, as = 0;
+	if (exit_art && (*J)->GetMaxLocals(J, m, &ml) == JVMTI_ERROR_NONE && (*J)->GetArgumentsSize(J, m, &as) == JVMTI_ERROR_NONE) return ml - as + idx;
+	return idx;
+}
+static void filter_actions(JNIEnv *jni, jobject filter, char *acts, size_t an) {   /* IntentFilter -> "a,b" ("-" none, "?" unreadable) */
+	char st[96]; jvalue none[1]; memset(none, 0, sizeof none);
+	jvalue c = jcall(jni, filter, 'I', "countActions", "()I", none, st, sizeof st);
+	size_t n = 0; acts[0] = 0;
+	if (st[0]) { snprintf(acts, an, "?"); return; }
+	for (jint i = 0; i < c.i && i < 12; i++) {
+		jvalue ia; ia.i = i;
+		jvalue a = jcall(jni, filter, 'L', "getAction", "(I)Ljava/lang/String;", &ia, st, sizeof st);
+		char one[100]; jstring_of(jni, a.l, one, sizeof one);
+		if (a.l) (*jni)->DeleteLocalRef(jni, a.l);
+		n += (size_t)snprintf(acts + n, an - n, "%s%s", n ? "," : "", one);
+	}
+	if (!acts[0]) snprintf(acts, an, "-");
+}
+static void emit_b(const char *kind, const char *acts, const char *cls, jint hash) {
+	char b[1024];
+	int32_t n = snprintf(b, sizeof b, "B\t%lld\t%d\t%s\t%s\t%s\t%08x\n", (long long)now_us(), tid(), kind, acts, cls, (uint32_t)hash);
+	if (n > (int32_t)sizeof b - 1) { n = sizeof b - 1; b[n - 1] = '\n'; }
+	emit(b, (size_t)n);
+}
+static void bcast_hit(JNIEnv *jni, jthread th, jmethodID m, uint8_t g) {
+	char acts[300] = "?", cls[160] = "?", st[96]; jint hash = 0;
+	jobject self = NULL, arg = NULL, rcv = NULL;
+	jvalue none[1]; memset(none, 0, sizeof none);
+	(*J)->GetLocalInstance(J, th, 0, &self);
+	if (g & G_REG) { if ((*J)->GetLocalObject(J, th, 0, arg_slot(m, 1), &rcv) != JVMTI_ERROR_NONE) rcv = NULL; }
+	else rcv = self;
+	if ((*J)->GetLocalObject(J, th, 0, arg_slot(m, 2), &arg) != JVMTI_ERROR_NONE) arg = NULL;
+	if ((g & G_REG) && !rcv) { if (self) (*jni)->DeleteLocalRef(jni, self); if (arg) (*jni)->DeleteLocalRef(jni, arg); return; }   /* registerReceiver(null, ...) only asks for the sticky intent */
+	if (rcv) {
+		jclass k = (*jni)->GetObjectClass(jni, rcv); class_name(k, cls, sizeof cls); (*jni)->DeleteLocalRef(jni, k);
+		(*J)->GetObjectHashCode(J, rcv, &hash);
+	}
+	if (arg && (g & G_REG)) filter_actions(jni, arg, acts, sizeof acts);
+	else if (arg && (g & G_RCV)) {
+		jvalue a = jcall(jni, arg, 'L', "getAction", "()Ljava/lang/String;", none, st, sizeof st);
+		jstring_of(jni, a.l, acts, sizeof acts);
+		if (!acts[0]) snprintf(acts, sizeof acts, "-");
+		if (a.l) (*jni)->DeleteLocalRef(jni, a.l);
+	}
+	emit_b((g & G_REG) ? "register" : "deliver", acts, cls, hash);
+	if (self) (*jni)->DeleteLocalRef(jni, self);
+	if (arg) (*jni)->DeleteLocalRef(jni, arg);
+	if (rcv && rcv != self) (*jni)->DeleteLocalRef(jni, rcv);
+}
+/* ATL only: receivers registered before the breakpoints were set sit in the static map Context.receiverMap
+   (filter -> receiver); B lines of kind "early". Android has no such map the agent could read: there, registrations
+   before the agent was armed are not seen. */
+static void scan_early_receivers(JNIEnv *jni) {
+	if (!k_context) return;
+	jfieldID f = (*jni)->GetStaticFieldID(jni, k_context, "receiverMap", "Ljava/util/Map;");
+	if (!f) { (*jni)->ExceptionClear(jni); return; }
+	jobject map = (*jni)->GetStaticObjectField(jni, k_context, f);
+	if (!map) return;
+	char st[96]; jvalue none[1]; memset(none, 0, sizeof none);
+	jvalue es = jcall(jni, map, 'L', "entrySet", "()Ljava/util/Set;", none, st, sizeof st);
+	jvalue it = es.l && !st[0] ? jcall(jni, es.l, 'L', "iterator", "()Ljava/util/Iterator;", none, st, sizeof st) : es;
+	uint32_t count = 0;
+	while (it.l && !st[0] && count < 200) {
+		jvalue h = jcall(jni, it.l, 'Z', "hasNext", "()Z", none, st, sizeof st);
+		if (st[0] || !h.z) break;
+		jvalue e = jcall(jni, it.l, 'L', "next", "()Ljava/lang/Object;", none, st, sizeof st);
+		if (st[0] || !e.l) break;
+		jvalue key = jcall(jni, e.l, 'L', "getKey", "()Ljava/lang/Object;", none, st, sizeof st);
+		jvalue val = jcall(jni, e.l, 'L', "getValue", "()Ljava/lang/Object;", none, st, sizeof st);
+		if (key.l && val.l) {
+			char acts[300], cls[160]; jint hash = 0;
+			filter_actions(jni, key.l, acts, sizeof acts);
+			jclass k = (*jni)->GetObjectClass(jni, val.l); class_name(k, cls, sizeof cls); (*jni)->DeleteLocalRef(jni, k);
+			(*J)->GetObjectHashCode(J, val.l, &hash);
+			emit_b("early", acts, cls, hash);
+			count++;
+		}
+		if (key.l) (*jni)->DeleteLocalRef(jni, key.l);
+		if (val.l) (*jni)->DeleteLocalRef(jni, val.l);
+		(*jni)->DeleteLocalRef(jni, e.l);
+	}
+	char z[48]; snprintf(z, sizeof z, "early receivers %u", count); info("%s", z);
+}
+
 static void JNICALL marks_watcher(jvmtiEnv *je, JNIEnv *jni, void *arg) {
 	(void)je; (void)arg;
 	int64_t done = 0;   /* bytes of the marks file already handled */
@@ -716,7 +1048,9 @@ static void JNICALL marks_watcher(jvmtiEnv *je, JNIEnv *jni, void *arg) {
 			if (fseek(f, done, SEEK_SET) == 0)
 				while (fgets(line, sizeof line, f) && strchr(line, '\n')) {
 					done += (int64_t)strlen(line);
-					memory_line(jni, (uint32_t)strtoul(line, NULL, 10));
+					uint32_t mi = (uint32_t)strtoul(line, NULL, 10);
+					memory_line(jni, mi);
+					if (opt_sys) { in_callback = 1; sys_probe(jni, mi); in_callback = 0; }   /* the probes' own exceptions (NameNotFoundException) are no app events */
 				}
 			fclose(f);
 		}
@@ -761,6 +1095,7 @@ static jint start(JavaVM *vm, char *options) {
 		if (!strcmp(o, "noex")) opt_ex = 0;
 		else if (!strcmp(o, "nolc")) opt_lc = 0;
 		else if (!strcmp(o, "noexit")) opt_exit = 0;
+		else if (!strcmp(o, "nosys")) opt_sys = 0;
 		else if (!strncmp(o, "arm=", 4)) snprintf(opt_arm, sizeof opt_arm, "%s", o + 4);
 		else if (!strncmp(o, "late=", 5)) snprintf(opt_late, sizeof opt_late, "%s", o + 5);
 		else if (!strncmp(o, "latesec=", 8)) opt_latesec = (uint32_t)strtoul(o + 8, NULL, 10);

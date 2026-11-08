@@ -44,6 +44,8 @@ SECTIONS: list[tuple[str, Callable[[Finding], bool]]] = [
     ("Exceptions", _kind_in("exc")),
     ("Crashes", _kind_in("crash")),
     ("Exit cause", _kind_in("exit")),
+    ("System answers differ", _kind_in("sys")),
+    ("Broadcasts registered, never delivered", _kind_in("bcast")),
     ("View tree differences", _kind_in("tree")),
     ("Rendering defects", _kind_in("render")),
     ("Lifecycle differences", _kind_in("lc")),
@@ -559,6 +561,15 @@ def build_pair_report(atl_dir: Path, android_dir: Path, density: float | None,
         raise UsageError("report DIR ANDROID-DIR: the first must be an ATL capture, the second one from record --android")
     _, android = load_capture_findings(acap, None, set())
     findings = mark_harmless(compare_sides(r.findings, android))
+    from .sources.sysanswers import annotate_broadcasts, answer_findings
+
+    notes: list[str] = []
+    and_events = parse_agent(acap.path(AGENT)) if acap.path(AGENT).is_file() else []
+    atl_events = parse_agent(root.joinpath(AGENT)) if root.joinpath(AGENT).is_file() else []
+    annotate_broadcasts(findings, and_events)
+    findings += answer_findings(atl_events, and_events, Capture(root).read_marks(), notes)
+    if notes:
+        r.extras["limits"] = r.extras.get("limits", []) + notes
     from .sources.render import android_ids
 
     same = android_ids(acap)   # a rendering defect that Android shows as well is not an ATL defect

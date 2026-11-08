@@ -18,6 +18,7 @@ class Klass(StrEnum):
     MISSING = "missing"
     EXC_ATL_ONLY = "exception-atl-only"
     STUB_RESULT_USED = "stub-result-used"
+    SYSTEM = "system-answer"
     TREE_VISIBLE = "tree-visible"
     MEMORY_GROWTH = "memory-growth"
     RENDER = "render"
@@ -26,7 +27,7 @@ class Klass(StrEnum):
 
 
 RANK: dict[Klass, int] = {
-    Klass.CRASH: 60, Klass.MISSING: 60, Klass.EXC_ATL_ONLY: 50, Klass.STUB_RESULT_USED: 40,
+    Klass.CRASH: 60, Klass.MISSING: 60, Klass.EXC_ATL_ONLY: 50, Klass.STUB_RESULT_USED: 40, Klass.SYSTEM: 40,
     Klass.TREE_VISIBLE: 30, Klass.RENDER: 30, Klass.MEMORY_GROWTH: 20, Klass.JANK: 10, Klass.OTHER: 0,
 }
 ANDROID_PENALTY = 5

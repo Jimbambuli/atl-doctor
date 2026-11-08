@@ -71,6 +71,18 @@ The report's \fBExit cause\fR section then names the first call: the exit status
 the stack and the last five exceptions before it. If the process ended without such a call, the finding says
 "Ende ohne System.exit/Runtime.exit erfasst" and gives the process's exit status or signal.
 .PP
+At every mark the agent asks the system what the app would be told (agent option \fBnosys\fR turns that off): the
+active network and its transports and capabilities, the active NetworkInfo, a fixed list of PackageManager features
+and packages (present or not), the display size and density, and the number of accounts (never their names).
+It asks through the Application itself; the app's own calls are not recorded. It also sets breakpoints in
+registerReceiver and in every BroadcastReceiver.onReceive and writes the actions registered and delivered.
+The report \fBBroadcasts registered, never delivered\fR names each action a receiver waits for that never came
+(this works without an Android recording; against one it says whether Android delivered it), and with
+.B report DIR ANDROID\-DIR
+the section \fBSystem answers differ\fR lists the queries whose last answer differs between ATL and Android.
+The Android agent is the same source; without a rooted device and the agent built for it that side has no answers
+and the report says so.
+.PP
 Results go to standard output, messages to standard error.
 The tool never asks questions and never opens a browser.
 If an optional probe is missing, one line on standard error says so and the recording goes on without it;

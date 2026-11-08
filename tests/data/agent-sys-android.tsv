@@ -1,0 +1,12 @@
+I	1000000	1	exit hooks 3
+B	1100000	7	register	android.net.conn.CONNECTIVITY_CHANGE	org.videolan.vlc.util.NetworkMonitor$1	0a1b2c3d
+B	1100200	7	register	android.intent.action.SCREEN_ON,android.intent.action.SCREEN_OFF	org.videolan.vlc.Screen	0a1b2c3e
+B	1150000	7	deliver	android.net.conn.CONNECTIVITY_CHANGE	org.videolan.vlc.util.NetworkMonitor$1	0a1b2c3d
+B	1300000	7	deliver	android.intent.action.SCREEN_ON	org.videolan.vlc.Screen	0a1b2c3e
+Q	1500000	1	connectivity.activeNetwork	present
+Q	1500000	1	connectivity.activeNetworkInfo	type=1 connected=true
+Q	1500000	1	connectivity.transports	WIFI
+Q	1500000	1	pm.feature:android.hardware.touchscreen	true
+Q	1500000	1	pm.package:com.google.android.gms	found
+Q	1500000	1	display.metrics	1080x2400@420dpi
+Q	1500000	1	accounts.count	0

@@ -152,3 +152,16 @@ def test_tracecount_self_time_per_phase_and_thread(built, tmp_path):
     r = run_counter(built, tmp_path / "t.bin", marks(tmp_path / "m", START, START + 1000), out, watch(tmp_path / "w"))
     assert r.returncode == 0, r.stderr
     assert table(f"{out}.time") == {f"0\t1\t0x{2 << 2:x}\t1000", f"0\t1\t0x{1 << 2:x}\t400", f"1\t2\t0x{3 << 2:x}\t400"}
+
+
+def test_tracecount_takes_the_highest_thread_number(built, tmp_path):
+    """ART numbers the threads of a trace 1..65535 (the format holds 16 bits; kernel thread ids may be larger)."""
+    top = 0xFFFF
+    recs = call(1, APP, STUB, 10) + call(top, APP, STUB, 20)
+    data = header(3, START) + method_op(METHODS) + thread_op(1, "main") + thread_op(top, "Worker") + encode_records(3, recs)
+    (tmp_path / "t.bin").write_bytes(data)
+    out = tmp_path / "tr"
+    r = run_counter(built, tmp_path / "t.bin", marks(tmp_path / "m", START), out, watch(tmp_path / "w", "\t".join(STUB[1:])))
+    assert r.returncode == 0, r.stderr
+    assert f"{top}\tWorker" in table(f"{out}.threads") and "1\tmain" in table(f"{out}.threads")
+    assert any(ln.startswith("0\t0x4\t2") for ln in table(f"{out}.counts"))   # both threads' calls counted

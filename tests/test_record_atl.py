@@ -787,13 +787,10 @@ def test_session_screenshot_only_when_atl_wrote_no_image(tmp_path, monkeypatch):
     assert (tmp_path / "c/shots/01-Main-view.png").read_bytes() == b"spectacle"
 
 
-def test_no_shots_blocks_atls_image_directory(tmp_path, monkeypatch):
+def test_no_shots_sets_no_image_target_but_keeps_the_tree(tmp_path, monkeypatch):
     import atl_doctor.record_atl as ra
     monkeypatch.setattr(ra, "has_viewdump", lambda prefix: True)
-    for shots in (True, False):
-        cap = Capture.create(tmp_path / f"c{shots}", "atl")
-        opts = RecordOptions(apk=Path("/x/app.apk"), out=None, prefix=Path("/p"), atl_src=None, agent=None, shots=shots)
-        _, env = build_command(opts, cap, None, None)
-        assert env["ATL_VIEWDUMP"] == f"{cap.root}/trees"          # the tree is recorded in both cases
-        assert (cap.root / "trees/shots").is_file() is (not shots)  # a file where ATL wants its directory: no image
-        assert not list(cap.root.rglob("*.png"))
+    cap = Capture.create(tmp_path / "c", "atl")
+    opts = RecordOptions(apk=Path("/x/app.apk"), out=None, prefix=Path("/p"), atl_src=None, agent=None, shots=False)
+    _, env = build_command(opts, cap, None, None)
+    assert env["ATL_VIEWDUMP"] == f"{cap.root}/trees"

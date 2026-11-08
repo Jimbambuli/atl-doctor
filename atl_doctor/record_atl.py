@@ -98,9 +98,6 @@ def build_command(opts: RecordOptions, cap: Capture, plugin: Path | None, agent:
         env["ATL_STUB_HITS"] = f"{c}/{STUB_HITS}"
     if has_viewdump(opts.prefix):
         env["ATL_VIEWDUMP"] = f"{c}/{TREES}"
-        if not opts.shots:  # ATLViewDump makes <dir>/shots itself: a plain file there: no image can be written
-            Path(c, TREES).mkdir(parents=True, exist_ok=True)
-            Path(c, TREES, SHOTS).write_bytes(b"")
     if wheel and " " in str(wheel):  # LD_PRELOAD splits at spaces too
         _warn(f"wheel-shim not used: LD_PRELOAD cannot hold a path with spaces ({wheel})")
         wheel = None
@@ -367,6 +364,8 @@ def record_atl(opts: RecordOptions) -> int:
     trees = "ATL_VIEWDUMP" in extra_env
     if trees:
         cap.path(TREES).mkdir()
+        if not opts.shots:  # ATLViewDump makes trees/shots itself: a plain file there, so no image can be written
+            (cap.path(TREES) / SHOTS).write_bytes(b"")
     if not opts.headless:  # screenshots come from spectacle inside the headless session
         probes = [Probe("spectacle", False, "screenshots need --headless", p.hint) if p.name == "spectacle" else p
                   for p in probes]

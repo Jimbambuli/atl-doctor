@@ -58,6 +58,8 @@ atl-doctor state save app.apk ready                 # app data (ATL) or AVD snap
                                                       # a step file can begin with `start_zustand: ready`
 atl-doctor record --android --input -o android-run app.apk  # what is done on the device -> android-run/input.jsonl (ATL: input.jsonl comes from the agent)
 atl-doctor scenario-from android-run -o s.steps       # a step file with `tap id/NAME "Text" path:.. rect:..`, replayable under ATL and on Android
+atl-doctor pack run1                                  # run1.tar.gz without personal data (paths, IPs, tokens, e-mail ...); SANITIZED.txt says what was replaced
+atl-doctor pack --full run1                           # run1-FULL.tar.gz, everything in plain text, only for people you trust
 atl-doctor report atl-run android-run                 # with replay.jsonl on both sides: "Replayed input", target found yes/no, tree after each step
 ```
 

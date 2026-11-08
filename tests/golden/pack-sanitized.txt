@@ -1,0 +1,41 @@
+atl-doctor pack: org.example.demo-20260101-120000
+stage: cleaned
+
+Replacements (rule: count; the original values are not listed):
+  home                2  home directory of the user and /home/NAME, /Users/NAME -> ~
+  user                0  user name -> <user>
+  host                1  host name -> <host>
+  secret-header       0  Authorization, Cookie, Set-Cookie and X-*-Token/Key/Auth header values -> <secret>
+  secret-bearer       0  Bearer tokens -> <secret>
+  secret-param        1  URL query and key=value parameters such as token, key, password, sid -> <secret>
+  secret-json         0  JSON members such as "password": "..." -> "<secret>"
+  account             0  account names (Account {name=...}, accountName=...) -> <account-N>
+  email               1  e-mail addresses -> <email-N>
+  mac                 1  MAC addresses -> <mac-N>
+  lan-ip              1  private IPv4 and IPv6 addresses (LAN, link-local, ULA, CGNAT) -> <lan-ip-N>
+  ip                  1  public IPv4 and IPv6 addresses -> <ip-N>
+  edit-text           0  text of input fields in trees/*.xml -> empty
+  input-text          0  typed text in input.jsonl (only the length stays)
+
+Placeholders are stable inside this archive: the same value always gets the same number.
+Not changed: screenshots (shots/*.png), UI texts in trees/*.xml other than input fields,
+package, class and method names.
+
+Files kept (7):
+  agent.tsv
+  atl.log
+  manifest.json
+  marks.tsv
+  trace/tr.callers
+  trace/tr.methods
+  trace/tr.threads
+
+Files left out (6):
+  armed  (not read by report)
+  logcat.txt  (not read by report)
+  trace/tr.counts  (not read by report)
+  trace/tr.stop  (not read by report)
+  trace/tr.time  (same content as trace/tr.threads)
+  trace/tracecount.log  (not read by report)
+
+Size of the files before: 1899 bytes, in the archive: 1824 bytes (uncompressed)

@@ -82,7 +82,7 @@ def finish(g) -> None:
 
 
 COMMAND_GROUPS = (
-    ("Record", ("record", "mark")),
+    ("Record", ("record", "mark", "pack")),
     ("Analyse", ("report", "explain", "diff", "scan", "scenario-from")),
     ("Compare", ("compare", "state")),
     ("Setup", ("check",)),
@@ -109,12 +109,12 @@ def _overview(sub) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    from . import bedienung, diff, env, record_atl, report, vergleich, zustand
+    from . import bedienung, diff, env, pack, record_atl, report, vergleich, zustand
     from .sources import scan
 
     parser = _Parser(prog="atl-doctor", formatter_class=_RawFormatter)
     sub = parser.add_subparsers(dest="command", parser_class=_Parser, metavar="COMMAND", help=argparse.SUPPRESS)
-    for mod in (record_atl, report, diff, scan, env, vergleich, zustand, bedienung):
+    for mod in (record_atl, report, diff, scan, env, vergleich, zustand, bedienung, pack):
         mod.register(sub)
     parser.usage = "atl-doctor [-h] [-q] [-v] [--version] COMMAND ..."
     parser.description = _overview(sub)

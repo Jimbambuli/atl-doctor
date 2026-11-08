@@ -5,6 +5,7 @@ Diagnose why an Android app does not run correctly under ATL.
 Record:
   record          record an app under ATL (or on Android) into a capture
   mark            start a new phase in the running recording
+  pack            pack a recording as .tar.gz, cleaned of personal data
 
 Analyse:
   report          report from a capture directory or a log

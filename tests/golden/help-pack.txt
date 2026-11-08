@@ -1,0 +1,30 @@
+usage: atl-doctor pack [-o FILE] [--full] [--user NAME] [--home DIR]
+                       [--host NAME] [-h] [-q] [-v]
+                       DIR
+
+Pack a capture directory into one .tar.gz that can be handed on. Cleaned
+(default): paths, user and host name, IP and MAC addresses, tokens and
+passwords, e-mail and account names are replaced by placeholders, typed text
+is removed. With --full everything stays as recorded. Files that report does
+not read, empty files and duplicates are left out in both. SANITIZED.txt in
+the archive lists the rules and how often each was applied. Prints the
+archive's path.
+
+Arguments:
+  DIR                capture directory (name PACKAGE-DATE-TIME)
+
+Output:
+  -o, --output FILE  archive to write (default: next to DIR, DIR.tar.gz, or
+                     DIR-FULL.tar.gz with --full)
+  --full             do not clean: all data in plain text, including
+                     passwords; name ends in -FULL
+
+Advanced:
+  --user NAME        user name to replace (default: the current user)
+  --home DIR         home directory to replace (default: $HOME)
+  --host NAME        host name to replace (default: this machine's)
+
+General:
+  -h, --help         show this help and exit
+  -q, --quiet        only errors on stderr
+  -v, --verbose      more messages on stderr

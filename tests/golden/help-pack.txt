@@ -5,10 +5,10 @@ usage: atl-doctor pack [-o FILE] [--full] [--user NAME] [--home DIR]
 Pack a capture directory into one .tar.gz that can be handed on. Cleaned
 (default): paths, user and host name, IP and MAC addresses, tokens and
 passwords, e-mail and account names are replaced by placeholders, typed text
-is removed. With --full everything stays as recorded. Files that report does
-not read, empty files and duplicates are left out in both. SANITIZED.txt in
-the archive lists the rules and how often each was applied. Prints the
-archive's path.
+is removed, and no screenshots are included. With --full everything stays as
+recorded. Files that report does not read, empty files and duplicates are left
+out in both. SANITIZED.txt in the archive lists the rules and how often each
+was applied. Prints the archive's path.
 
 Arguments:
   DIR                capture directory (name PACKAGE-DATE-TIME)

@@ -18,8 +18,8 @@ Replacements (rule: count; the original values are not listed):
   input-text          0  typed text in input.jsonl (only the length stays)
 
 Placeholders are stable inside this archive: the same value always gets the same number.
-Not changed: screenshots (shots/*.png), UI texts in trees/*.xml other than input fields,
-package, class and method names.
+Not changed: UI texts in trees/*.xml other than input fields, package, class and method names.
+screenshots: omitted (only --full keeps them).
 
 Files kept (7):
   agent.tsv

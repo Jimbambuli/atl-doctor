@@ -493,7 +493,7 @@ def apply_capture_aosp(r: Report, root: Path, aosp: str | None = None, no_fetch:
 
 
 def build_capture_report(path: Path, jank_min_frames: int = JANK_MIN_FRAMES) -> tuple[Report, Path]:
-    from .capture import AGENT, TRACE_DIR, TREES, Capture
+    from .capture import AGENT, SHOTS, TRACE_DIR, TREES, Capture
     from .sources import load_capture_findings
     from .sources.exceptions import agent_problems, parse_agent
     from .env import atl_jars
@@ -515,6 +515,8 @@ def build_capture_report(path: Path, jank_min_frames: int = JANK_MIN_FRAMES) -> 
         env[KEY] = summary(wc)
         if details(wc):
             env[DETAIL_KEY] = details(wc)
+        if any(cap.path(TREES).glob("*.xml")) and not any(cap.path(SHOTS).glob("*.png")):
+            env["pixel_checks"] = "not checked (no screenshots in this capture)"
     if m.environment.get("trace"):
         env["trace"] = m.environment["trace"]
     if m.environment.get("tracecount"):

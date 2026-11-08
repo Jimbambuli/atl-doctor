@@ -58,14 +58,15 @@ atl-doctor state save app.apk ready                 # app data (ATL) or AVD snap
                                                       # a step file can begin with `start_state: ready`
 atl-doctor record --android --input -o android-run app.apk  # what is done on the device -> android-run/input.jsonl (ATL: input.jsonl comes from the agent)
 atl-doctor scenario-from android-run -o s.steps       # a step file with `tap id/NAME "Text" path:.. rect:..`, replayable under ATL and on Android
-atl-doctor pack run1                                  # run1.tar.gz without personal data (paths, IPs, tokens, e-mail ...); SANITIZED.txt says what was replaced
-atl-doctor pack --full run1                           # run1-FULL.tar.gz, everything in plain text, only for people you trust
+atl-doctor pack run1                                  # run1.tar.gz without personal data (paths, IPs, tokens, e-mail ...) and without screenshots; SANITIZED.txt says what was done
+atl-doctor pack --full run1                           # run1-FULL.tar.gz, everything in plain text, with screenshots, only for people you trust
 atl-doctor report atl-run android-run                 # with replay.jsonl on both sides: "Replayed input", target found yes/no, tree after each step
 ```
 
 Under ATL a mark's tree comes with an image of the app window alone (written by ATL's ATLViewDump as
 `shots/NN-name.png`: no screen capture, no portal, nothing of other windows); spectacle in the headless session is
-only the fallback when ATL writes none.
+only the fallback when ATL writes none. `pack` leaves every image out unless `--full`; a report of such an archive
+lists the pixel checks as not checked (`RecordOptions.shots=False` makes the recorder write none at all).
 
 With screenshots (`--headless`/`--steps`) the report also lists *rendering defects* (class `render`, with the view's
 ID/path, rectangle and a picture cut from the screenshot): unreadable text (WCAG contrast of the measured text colour

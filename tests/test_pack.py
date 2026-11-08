@@ -200,3 +200,33 @@ def test_not_a_capture(tmp_path, capsys):
     (tmp_path / "x").mkdir()
     assert main(["pack", str(tmp_path / "x")]) != 0
     assert "no manifest.json" in capsys.readouterr().err
+
+
+def test_screenshots_only_with_full_even_if_the_folder_has_them(cap):
+    (cap / "shots").mkdir(exist_ok=True)
+    (cap / "shots/01-running.png").write_bytes(b"\x89PNG-one")
+    (cap / "shots/01-running.origin").write_text("0 0\n")
+    run(cap)
+    run(cap, "--full")
+    plain, full = (cap.parent / f"{NAME}{s}.tar.gz" for s in ("", "-FULL"))
+    assert not [n for n in names(plain) if "shots" in n or n.endswith(".png")]
+    assert f"{NAME}/shots/01-running.png" in names(full)
+    out = cap.parent / "x"
+    unpack(plain, out)
+    note = (out / NAME / "SANITIZED.txt").read_text()
+    assert "screenshots: omitted" in note and "shots/01-running.png  (screenshots only with --full)" in note
+
+
+def test_report_of_an_archive_without_screenshots_marks_pixel_checks_not_checked(cap, capsys):
+    (cap / "shots").mkdir(exist_ok=True)
+    (cap / "shots/01-running.png").write_bytes(b"\x89PNG-one")
+    run(cap)
+    out = cap.parent / "x"
+    unpack(cap.parent / f"{NAME}.tar.gz", out)
+    assert not (out / NAME / "shots").exists()
+    capsys.readouterr()
+    assert main(["report", str(out / NAME), "--format", "json"]) in (0, 1)
+    got = capsys.readouterr().out
+    assert "error" not in got.lower()[:200]
+    if (out / NAME / "trees").is_dir() and any((out / NAME / "trees").glob("*.xml")):
+        assert "pixel_checks" in got

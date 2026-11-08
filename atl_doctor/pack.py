@@ -33,6 +33,7 @@ KEEP = re.compile(
     r"|trace/(?:stubs\.tsv|tr\.methods|tr\.callers|tr\.time|tr\.threads)"
     r"|trees/[^/]+\.xml|shots/[^/]+\.(?:png|origin)|perf/gfxinfo-[^/]+\.txt")
 BINARY = (".png",)
+IMAGES = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".origin")
 EDITABLE = ("EditText", "AutoCompleteTextView", "SearchAutoComplete", "MultiAutoCompleteTextView")
 
 SECRET_NAMES = (r"token|access_token|refresh_token|id_token|auth_token|password|passwd|pwd|secret|client_secret|"
@@ -225,6 +226,9 @@ def pack(cap: Path, out: Path, full: bool = False, home: str = "", user: str = "
     kept: dict[str, bytes] = {}
     seen: dict[str, str] = {}
     for rel in _files(cap):
+        if not full and (rel.split("/", 1)[0] == "shots" or rel.lower().endswith(IMAGES)):
+            omitted.append((rel, "screenshots only with --full"))   # also if the recorder left some in the folder
+            continue
         if not KEEP.fullmatch(rel):
             omitted.append((rel, "not read by report"))
             continue
@@ -265,8 +269,8 @@ def _note(name: str, full: bool, san: Sanitizer, omitted, kept, sizes) -> str:
         lines += ["Replacements (rule: count; the original values are not listed):"]
         lines += [f"  {n:<14} {san.counts.get(n, 0):>6}  {what}" for n, what in RULES]
         lines += ["", "Placeholders are stable inside this archive: the same value always gets the same number.",
-                  "Not changed: screenshots (shots/*.png), UI texts in trees/*.xml other than input fields,",
-                  "package, class and method names."]
+                  "Not changed: UI texts in trees/*.xml other than input fields, package, class and method names.",
+                  "screenshots: omitted (only --full keeps them)."]
     lines += ["", f"Files kept ({len(kept)}):"] + [f"  {r}" for r in kept]
     lines += ["", f"Files left out ({len(omitted)}):"] + [f"  {r}  ({why})" for r, why in omitted]
     lines += ["", f"Size of the files before: {sizes[0]} bytes, in the archive: {sizes[1]} bytes (uncompressed)"]
@@ -306,7 +310,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     p, g = command(sub, "pack", "pack a recording as .tar.gz, cleaned of personal data",
                    "Pack a capture directory into one .tar.gz that can be handed on. Cleaned (default): paths, user and\n"
                    "host name, IP and MAC addresses, tokens and passwords, e-mail and account names are replaced\n"
-                   "by placeholders, typed text is removed. With --full everything stays as recorded. Files that\n"
+                   "by placeholders, typed text is removed, and no screenshots are included. With --full everything stays as recorded. Files that\n"
                    "report does not read, empty files and duplicates are left out in both. SANITIZED.txt in the\n"
                    "archive lists the rules and how often each was applied. Prints the archive's path.")
     g.args.add_argument("dir", metavar="DIR", help="capture directory (name PACKAGE-DATE-TIME)")

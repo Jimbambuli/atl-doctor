@@ -67,6 +67,7 @@ class RecordOptions:
     # --attach-agent, the runtime stays non-debuggable), ATL counts its stub calls itself (ATL_STUB_HITS) and the
     # time line comes from ART's sampling profiler instead of a full method trace. Needs an ATL with both.
     light: bool = False
+    shots: bool = True    # ATL: images of the app window at the marks; False writes none (ATL's shot hook is blocked)
     input: bool = False   # Android: record the touches and keys of the device into input.jsonl (getevent)
 
 
@@ -97,6 +98,9 @@ def build_command(opts: RecordOptions, cap: Capture, plugin: Path | None, agent:
         env["ATL_STUB_HITS"] = f"{c}/{STUB_HITS}"
     if has_viewdump(opts.prefix):
         env["ATL_VIEWDUMP"] = f"{c}/{TREES}"
+        if not opts.shots:  # ATLViewDump makes <dir>/shots itself: a plain file there: no image can be written
+            Path(c, TREES).mkdir(parents=True, exist_ok=True)
+            Path(c, TREES, SHOTS).write_bytes(b"")
     if wheel and " " in str(wheel):  # LD_PRELOAD splits at spaces too
         _warn(f"wheel-shim not used: LD_PRELOAD cannot hold a path with spaces ({wheel})")
         wheel = None
@@ -414,7 +418,8 @@ def record_atl(opts: RecordOptions) -> int:
             if steps is not None:
                 driver = make_atl_driver(cap, session, opts, info.package)
                 steps_state = _start_steps(cap, driver, steps, str(opts.steps))
-            rc = _record_loop(cap, proc, stop, ctl, trees, steps_state, session, memory=not opts.launcher)
+            rc = _record_loop(cap, proc, stop, ctl, trees, steps_state, session, memory=not opts.launcher,
+                             shots=opts.shots)
     except BaseException:
         if count_proc:  # e.g. a full disk: the counter would wait for its stop file forever
             count_proc.kill()
@@ -465,7 +470,7 @@ def _measure_window_close(proc: subprocess.Popen, closed_at: float, ended_at: di
 
 
 def _record_loop(cap: Capture, proc: subprocess.Popen, stop: _Stop, ctl: int, trees: bool, steps_state: dict,
-                 session: HeadlessSession | None = None, memory: bool = True) -> int:
+                 session: HeadlessSession | None = None, memory: bool = True, shots: bool = True) -> int:
     """Until ATL ends, SIGINT/SIGTERM or the steps are done; serves the control FIFO meanwhile.
     memory: sample proc's memory per mark (not for a launcher: its process is not the app)."""
     started, buf = time.monotonic(), bytearray()
@@ -490,14 +495,14 @@ def _record_loop(cap: Capture, proc: subprocess.Popen, stop: _Stop, ctl: int, tr
                     if memory:
                         _memory(cap, proc.pid, mk.index)
                     if trees:
-                        pending.append(_request_tree(cap, mk, session))
+                        pending.append(_request_tree(cap, mk, session if shots else None))
             except BlockingIOError:
                 pass
     for mk in drain_control(cap, ctl, buf):  # a mark sent by the last step
         if memory:
             _memory(cap, proc.pid, mk.index)
         if trees:
-            pending.append(_request_tree(cap, mk, session))
+            pending.append(_request_tree(cap, mk, session if shots else None))
     for t in pending:  # ATL must answer the tree (and pose for the screenshot) before it is ended
         if proc.poll() is None:
             t.join(TREE_WAIT_S)

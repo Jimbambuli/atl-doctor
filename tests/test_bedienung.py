@@ -451,3 +451,48 @@ def test_agent_records_clicks_on_a_host_jvm(built, tmp_path, opts, expect):
     assert t[1][6:] == ["0", "0", "30", "9", "1/2"]
     assert t[2][0] == "long-tap" and t[2][3] == "" and t[2][10] == "1/1"   # no resource name (NotFoundException): empty id
     assert t[3][1] == "" and t[3][10] == "-"   # no activity, no content view above: window-relative rectangle, no path
+
+
+@pytest.mark.skipif(not shutil.which("meson") or not shutil.which("javac"), reason="meson or JDK missing")
+def test_agent_follows_atl_input_trace_hooks_on_a_host_jvm(built, tmp_path):
+    """With android.atl.InputTrace the agent reports what the user does (tap, long-tap, text length, scroll, keys) and no
+    longer the performClick of the app itself."""
+    import subprocess
+    cls, out = tmp_path / "classes", tmp_path / "agent.tsv"
+    cls.mkdir()
+    data = Path(__file__).parent / "data"
+    srcs = [*(data / "inputjava").rglob("*.java"), *(data / "inputtrace").rglob("*.java")]
+    subprocess.run(["javac", "-d", str(cls), *map(str, srcs)], check=True, capture_output=True)
+    agent = f"-agentpath:{built / 'libatl_doctor_agent.so'}={out},noex,noexit,nosys"
+    r = subprocess.run(["nice", "-n", "19", shutil.which("java"), "-cp", str(cls), agent, "TraceMain"], capture_output=True,
+                       text=True, timeout=120)
+    assert r.returncode == 0, r.stderr
+    from atl_doctor.sources.exceptions import parse_agent
+    ev = parse_agent(out)
+    assert not [e for e in ev if e.tag == "I" and e.fields[0].startswith(("skipped", "SetBreakpoint"))]
+    t = [e.fields for e in ev if e.tag == "T"]
+    assert [x[0] for x in t] == ["tap", "text", "key", "key", "scroll", "long-tap"]
+    assert t[0][3] == "org.example:id/v7f01" and t[0][4] == "Save"
+    assert t[1][2] == "android.widget.EditText" and t[1][4] == "6" and "secret" not in out.read_text()
+    assert t[2][4] == "4,0" and t[3][4] == "66,0" and t[4][4] == "0,300"
+    out_ev = bd.events_from_agent(ev)
+    assert [e["kind"] for e in out_ev] == ["tap", "text", "back", "key", "scroll", "long-tap"]
+    assert out_ev[1]["text"] == {"len": 6} and out_ev[3]["key"] == "Return" and out_ev[4]["scroll"] == {"dx": 0.0, "dy": 300.0}
+
+
+def test_events_from_agent_user_input_lines_are_merged():
+    def t(us, kind, text="", cls="android.widget.EditText", i="org.x:id/q"):
+        return f"T\t{us}\t7\t{kind}\tMainActivity\t{cls}\t{i}\t{text}\t\t0\t0\t10\t10\t0/1"
+    k = lambda us, c, a=0: f"T\t{us}\t7\tkey\t\t\t\t{c},{a}\t\t\t\t\t\t-"
+    lines = [t(1_000_000, "text", "1"), t(1_200_000, "text", "2"), t(1_400_000, "text", "3"),   # one text, 3 characters
+             t(9_000_000, "scroll", "0,100", "android.view.View", ""), t(9_100_000, "scroll", "0,100", "android.view.View", ""),
+             t(9_200_000, "scroll", "0,-100", "android.view.View", ""),                     # direction change: new event
+             t(12_000_000, "tap", "", "android.view.View", "org.x:id/b"), t(12_010_000, "tap", "", "android.view.View", "org.x:id/b"),
+             k(14_000_000, 111), k(14_010_000, 4), k(14_100_000, 4, 1), k(15_000_000, 57), k(16_000_000, 66),
+             "L\t14010000\t7\tA\tonBackPressed\tMainActivity\tx\t01\ty"]
+    out = bd.events_from_agent(parse_agent_lines(lines))
+    assert [e["kind"] for e in out] == ["text", "scroll", "scroll", "tap", "back", "key"]
+    assert out[0]["text"] == {"len": 3} and out[0]["target"]["text"] == ""
+    assert [e["scroll"]["dy"] for e in out[1:3]] == [200.0, -100.0]
+    assert out[5]["key"] == "Return"
+

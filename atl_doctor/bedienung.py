@@ -23,6 +23,11 @@ accessibility class). dy is the change of the scroll position in dp (positive = 
 Text is sanitised: a text event holds only the length ({"len": n}), and the text of an editable target (EditText,
 AutoCompleteTextView) is left out of the target. Only with header "full": true a text event also holds
 "value" and the target keeps its text. A scenario made from a sanitised recording types n placeholder characters.
+
+Under ATL the agent follows ATL's android.atl.InputTrace hooks when the build has them (the fork branch fix-r5): tap and
+long-tap only for clicks of the user (not callOnClick() of the app), text with the length, scroll (wheel notches of one
+direction joined, pixels = dp), key and back from the keys that reached the window. Without the hooks it sees every
+View.performClick and onBackPressed, and no text, scroll or keys.
 """
 from __future__ import annotations
 
@@ -132,20 +137,82 @@ def read_input(path: Path) -> tuple[dict, list[dict]]:
 
 
 # ------------------------------------------------------------------ ATL: agent T and L lines
-def events_from_agent(agent_events: list, full: bool = False) -> list[dict]:
-    """Input events from the agent's lines: T (click on a view) and L onBackPressed of an Activity (back).
+# Android KeyEvent codes of the keys ATL's InputTrace.key() reports -> xkb names as in the step files
+AGENT_KEYS = {4: "back", 61: "Tab", 62: "space", 66: "Return", 67: "BackSpace", 111: "Escape", 112: "Delete",
+              19: "Up", 20: "Down", 21: "Left", 22: "Right", 92: "Page_Up", 93: "Page_Down", 122: "Home", 123: "End",
+              82: "Menu"}
+MERGE_TAP_S = 0.05      # the same view clicked again within this long is one tap (two ATL paths can report one click)
+MERGE_TEXT_S = 2.0      # keystrokes (and a text the app sets) in one field with pauses up to this long are one text event
+MERGE_SCROLL_S = 0.4    # wheel notches (or touchpad deltas) of one direction with pauses up to this long are one scroll
+ESCAPE_BACK_S = 0.05    # ATL turns an Escape no view consumed into BACK: the Escape just before a BACK is not a key of its own
 
-    The agent never reports the text of an EditText; `full` has no effect on this source."""
+
+def _view_key(e: dict) -> tuple:
+    t = e.get("target") or {}
+    return (t.get("id"), t.get("cls"), t.get("path"))
+
+
+def events_from_agent(agent_events: list, full: bool = False) -> list[dict]:
+    """Input events from the agent's lines: T (a click, text, scroll or key of the user; with ATL's InputTrace only
+    what the user does, without it every View.performClick) and L onBackPressed of an Activity (back).
+
+    The agent never reports the text of an EditText; `full` has no effect on this source. T lines of kind text carry the
+    length and kind scroll "dx,dy" (pixels, 1:1 with dp under ATL) in the text column; kind key has no view and
+    "keyCode,action" there. When the agent saw InputTrace (any text/scroll/key line), BACK comes from the key lines, not
+    from onBackPressed (which also runs when the app calls it)."""
     out: list[dict] = []
+    traced = any(a.tag == "T" and a.fields[0] in ("text", "scroll", "key") for a in agent_events)
     for a in agent_events:
         if a.tag == "T":
             kind, act, cls, id_, text, desc, l, t, r, b, path = a.fields
+            if kind == "key":
+                m = re.fullmatch(r"(\d+),(\d+)", text)
+                name = AGENT_KEYS.get(int(m.group(1))) if m else None
+                if m and m.group(2) == "0" and name:   # key down only; letters and modifiers are text or nothing
+                    out.append(make_event("back", a.t_us) if name == "back" else make_event("key", a.t_us, key=name))
+                continue
             rect = [float(x) for x in (l, t, r, b)] if all(re.fullmatch(r"-?\d+", x) for x in (l, t, r, b)) else None
+            if kind == "text":
+                tg = make_target(id_, cls, "", desc, path, rect, full)
+                n = int(text) if text.isdigit() else 0
+                out.append(make_event("text", a.t_us, act, tg, text=PLACEHOLDER * n))
+                continue
+            if kind == "scroll":
+                m = re.fullmatch(r"(-?\d+),(-?\d+)", text)
+                if m:
+                    out.append(make_event("scroll", a.t_us, act, scroll=(float(m.group(1)), float(m.group(2)))))
+                continue
             tg = make_target(id_, cls, text, desc, path, rect, full)
             point = [(rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2] if rect and rect[2] > rect[0] else None
             out.append(make_event(kind, a.t_us, act, tg, point))
-        elif a.tag == "L" and a.fields[0] == "A" and a.fields[1] == "onBackPressed":
+        elif a.tag == "L" and a.fields[0] == "A" and a.fields[1] == "onBackPressed" and not traced:
             out.append(make_event("back", a.t_us, a.fields[2]))
+    return _merge_agent_events(out)
+
+
+def _merge_agent_events(events: list[dict]) -> list[dict]:
+    """Join what the agent reports piece by piece: keystrokes into one text event, wheel notches into one scroll, a
+    click reported twice into one tap; an Escape right before a BACK is dropped."""
+    out: list[dict] = []
+    last: dict[int, int] = {}   # id() of a joined event -> time of its last piece
+    for e in sorted(events, key=lambda x: x["t_us"]):
+        p = out[-1] if out else None
+        gap = (e["t_us"] - last.get(id(p), p["t_us"])) / 1e6 if p else 0.0
+        k = e["kind"]
+        if p and k == p["kind"] and k in ("tap", "long-tap") and gap <= MERGE_TAP_S and _view_key(e) == _view_key(p):
+            continue
+        if p and k == p["kind"] == "text" and gap <= MERGE_TEXT_S and _view_key(e) == _view_key(p):
+            p["text"] = e["text"]   # the length after the last keystroke
+            last[id(p)] = e["t_us"]
+            continue
+        if p and k == p["kind"] == "scroll" and gap <= MERGE_SCROLL_S and all(
+                (e["scroll"][d] >= 0) == (p["scroll"][d] >= 0) for d in ("dx", "dy")):
+            p["scroll"] = {d: round(p["scroll"][d] + e["scroll"][d], 1) for d in ("dx", "dy")}
+            last[id(p)] = e["t_us"]
+            continue
+        if k == "back" and p and p["kind"] == "key" and p.get("key") == "Escape" and gap <= ESCAPE_BACK_S:
+            out.pop()
+        out.append(dict(e))
     return out
 
 

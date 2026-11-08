@@ -770,33 +770,49 @@ def _positive_int(v: str) -> int:
 
 
 def register(sub: argparse._SubParsersAction) -> None:
-    from .cli import common_parser
+    from .cli import command, done
 
-    p = sub.add_parser("report", help="report from a capture directory or a log", parents=[common_parser()])
-    p.add_argument("-f", "--format", choices=["text", "json", "html"], default="text")
-    p.add_argument("-o", "--output", metavar="FILE", help="write to FILE instead of stdout")
-    p.add_argument("--fail-on", metavar="CLASS[,CLASS]",
-                   help="exit 4 if a finding of one of these classes exists (" + ", ".join(k.value for k in Klass) + ")")
-    p.add_argument("--log", action="append", metavar="FILE", help="log mode: one log file per phase (repeatable)")
-    p.add_argument("--atl-src", metavar="DIR", help="ATL source tree; match logged stub messages against its stub list "
-                                                    "(default: $ATL_DOCTOR_ATL_SRC)")
-    p.add_argument("--aosp", metavar="DIR", help="AOSP source tree (root or frameworks/base) to compare stubs and "
-                                                 "missing methods with (default: $ATL_DOCTOR_AOSP)")
-    p.add_argument("--no-aosp-fetch", action="store_true", help="do not download AOSP source when --aosp is not given (default: fetch once into the cache)")
-    p.add_argument("--density", type=float, metavar="D",
-                   help="Android display density (dp scale) for the tree comparison (default: from the Android capture)")
-    p.add_argument("--jank-min-frames", type=_positive_int, default=JANK_MIN_FRAMES, metavar="N",
-                   help=f"fewest frames a phase needs for a jank finding (default {JANK_MIN_FRAMES}); fewer is noted, "
-                        "not reported")
-    p.add_argument("dirs", nargs="*", metavar="DIR", help="capture directory or APK Starter archive (.tar.gz) [and Android capture directory]")
-    p.set_defaults(func=_run_report)
+    p, g = command(sub, "report", "report from a capture directory or a log",
+                   "Evaluate a capture directory (or an APK Starter archive, or a log) into a report of\n"
+                   "findings. With a second, Android capture the two sides are compared.")
+    g.args.add_argument("dirs", nargs="*", metavar="DIR",
+                        help="capture directory or APK Starter archive (.tar.gz), then optionally the Android "
+                             "capture directory")
+    g.input.add_argument("--log", action="append", metavar="FILE",
+                         help="log mode: one log file per phase (repeatable)")
+    g.input.add_argument("--density", type=float, metavar="D",
+                         help="Android display density (dp scale) for the tree comparison (default: from the "
+                              "Android capture)")
+    g.output.add_argument("-f", "--format", choices=["text", "json", "html"], default="text",
+                          help="report format (default: text)")
+    g.output.add_argument("-o", "--output", metavar="FILE", help="write to FILE instead of stdout")
+    g.output.add_argument("--fail-on", metavar="CLASS[,CLASS]",
+                          help="exit 4 if a finding of one of these classes exists (" +
+                               ", ".join(k.value for k in Klass) + ")")
+    g.atl.add_argument("--atl-src", metavar="DIR",
+                       help="ATL source tree; match logged stub messages against its stub list "
+                            "(default: $ATL_DOCTOR_ATL_SRC)")
+    g.atl.add_argument("--aosp", metavar="DIR",
+                       help="AOSP source tree (root or frameworks/base) to compare stubs and missing methods "
+                            "with (default: $ATL_DOCTOR_AOSP)")
+    g.advanced.add_argument("--no-aosp-fetch", action="store_true",
+                            help="do not download AOSP source when --aosp is not given (default: fetch once into "
+                                 "the cache)")
+    g.advanced.add_argument("--jank-min-frames", type=_positive_int, default=JANK_MIN_FRAMES, metavar="N",
+                            help=f"fewest frames a phase needs for a jank finding (default: {JANK_MIN_FRAMES}); "
+                                 "fewer is noted, not reported")
+    done(p, g, _run_report)
 
-    e = sub.add_parser("explain", help="show everything known about one finding", parents=[common_parser()])
-    e.add_argument("-d", "--dir", metavar="DIR", help="capture directory or JSON report")
-    e.add_argument("--aosp", metavar="DIR", help="AOSP source tree (root or frameworks/base; default: $ATL_DOCTOR_AOSP)")
-    e.add_argument("--no-aosp-fetch", action="store_true", help="do not download AOSP source when --aosp is not given (default: fetch once into the cache)")
-    e.add_argument("--jank-min-frames", type=_positive_int, default=JANK_MIN_FRAMES, metavar="N",
-                   help=f"fewest frames a phase needs for a jank finding (default {JANK_MIN_FRAMES}); fewer is noted, "
-                        "not reported")
-    e.add_argument("id", metavar="ID", help="full ID, short ID or unique short-ID prefix")
-    e.set_defaults(func=_run_explain)
+    p, g = command(sub, "explain", "show everything known about one finding",
+                   "Show all evidence for one finding of a report, found by its ID.")
+    g.args.add_argument("id", metavar="ID", help="full ID, short ID or unique short-ID prefix")
+    g.input.add_argument("-d", "--dir", metavar="DIR", help="capture directory or JSON report")
+    g.atl.add_argument("--aosp", metavar="DIR",
+                       help="AOSP source tree (root or frameworks/base; default: $ATL_DOCTOR_AOSP)")
+    g.advanced.add_argument("--no-aosp-fetch", action="store_true",
+                            help="do not download AOSP source when --aosp is not given (default: fetch once into "
+                                 "the cache)")
+    g.advanced.add_argument("--jank-min-frames", type=_positive_int, default=JANK_MIN_FRAMES, metavar="N",
+                            help=f"fewest frames a phase needs for a jank finding (default: {JANK_MIN_FRAMES}); "
+                                 "fewer is noted, not reported")
+    done(p, g, _run_explain)

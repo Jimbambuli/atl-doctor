@@ -87,12 +87,14 @@ def _run_diff(args: argparse.Namespace) -> int:
 
 
 def register(sub: argparse._SubParsersAction) -> None:
-    from .cli import common_parser
+    from .cli import command, done
 
-    p = sub.add_parser("diff", help="compare two JSON reports", parents=[common_parser()])
-    p.add_argument("-f", "--format", choices=["text", "json"], default="text")
-    p.add_argument("--fail-on", metavar="new|CLASS[,CLASS]",
-                   help="exit 4 if there are new findings (new) or new findings of these classes")
-    p.add_argument("old", metavar="OLD.json")
-    p.add_argument("new", metavar="NEW.json")
-    p.set_defaults(func=_run_diff)
+    p, g = command(sub, "diff", "compare two JSON reports",
+                   "Show which findings are new, gone or changed between two JSON reports (report -f json).")
+    g.args.add_argument("old", metavar="OLD.json", help="the earlier report")
+    g.args.add_argument("new", metavar="NEW.json", help="the later report")
+    g.output.add_argument("-f", "--format", choices=["text", "json"], default="text",
+                          help="output format (default: text)")
+    g.output.add_argument("--fail-on", metavar="new|CLASS[,CLASS]",
+                          help="exit 4 if there are new findings (new) or new findings of these classes")
+    done(p, g, _run_diff)

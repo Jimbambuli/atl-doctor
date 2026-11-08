@@ -1,0 +1,34 @@
+usage: atl-doctor [-h] [-q] [-v] [--version] COMMAND ...
+
+Diagnose why an Android app does not run correctly under ATL.
+
+Record:
+  record          record an app under ATL (or on Android) into a capture
+  mark            start a new phase in the running recording
+
+Analyse:
+  report          report from a capture directory or a log
+  explain         show everything known about one finding
+  diff            compare two JSON reports
+  scan            static coverage of APKs against ATL (no start)
+  scenario-from   make a step file from a recorded input
+
+Compare:
+  compare         record under ATL and on Android, report the differences
+  state           save or load an app's state (data dir / AVD snapshot)
+
+Setup:
+  check           check the environment, say how to fix what is missing
+
+General:
+  -h, --help     show this help and exit
+  -q, --quiet    only errors on stderr
+  -v, --verbose  more messages on stderr
+  --version      show the version and exit
+
+Examples:
+  atl-doctor check                   # what can be measured on this machine
+  atl-doctor record -o run1 app.apk  # record until the app ends (or Ctrl-C)
+  atl-doctor report run1             # text report of the recording on stdout
+
+All options of a command: atl-doctor COMMAND -h

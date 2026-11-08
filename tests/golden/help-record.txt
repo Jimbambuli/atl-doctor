@@ -1,0 +1,51 @@
+usage: atl-doctor record [--steps FILE] [--android] [--input] [-o DIR]
+                         [--prefix DIR] [--launcher CMD] [--atl-src DIR]
+                         [--agent PATH] [--headless] [--no-trace] [--light]
+                         [--heap] [-h] [-q] [-v]
+                         APK [ATL-ARGS ...]
+
+Run APK under android-translation-layer with the agent and write a capture
+directory (trace, log, screenshots, steps). It ends when the app ends or on
+Ctrl-C.
+
+Arguments:
+  APK               the app to record
+  ATL-ARGS          arguments for android-translation-layer, after --
+
+Input:
+  --steps FILE      drive the app with a step file (implies --headless under
+                    ATL)
+  --android         record the same app on an Android device over adb (own
+                    capture directory)
+  --input           with --android: also record what is done on the device
+                    (touches, keys) into input.jsonl; under ATL the agent
+                    writes input.jsonl whenever views were clicked
+
+Output:
+  -o, --output DIR  capture directory (default: ./atl-doctor-YYYYmmdd-HHMMSS)
+
+ATL environment:
+  --prefix DIR      ATL installation prefix (default: $ATL_DOCTOR_PREFIX)
+  --launcher CMD    start ATL with this command (APK and ATL-ARGS appended)
+                    instead of a prefix, e.g. 'flatpak run ID'
+  --atl-src DIR     ATL source tree for the stub list (default:
+                    $ATL_DOCTOR_ATL_SRC)
+  --agent PATH      JVMTI agent library (default: $ATL_DOCTOR_AGENT, then the
+                    helper directories)
+  --headless        run ATL in a private invisible KWin session (kwin_wayland
+                    --virtual)
+
+Advanced:
+  --no-trace        no method trace: the app runs at full speed, but the
+                    report has no stub hits
+  --light           fast recording: agent attached after the start (ATL
+                    --attach-agent), stub hits counted by ATL, time line from
+                    ART's sampling profiler instead of a full method trace
+                    (needs a recent ATL)
+  --heap            count instances and bytes per class at every mark (agent;
+                    slow, forces a GC per mark)
+
+General:
+  -h, --help        show this help and exit
+  -q, --quiet       only errors on stderr
+  -v, --verbose     more messages on stderr

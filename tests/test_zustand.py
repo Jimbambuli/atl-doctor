@@ -31,21 +31,21 @@ def test_atl_save_and_load_roundtrip(home, apk, capsys):
     data = atl_data_dir(apk, None)
     (data / "shared_prefs").mkdir(parents=True)
     (data / "shared_prefs/p.xml").write_text("eingerichtet")
-    assert main(["zustand", "sichern", str(apk), "eingerichtet"]) == 0
+    assert main(["state", "save", str(apk), "eingerichtet"]) == 0
     (data / "shared_prefs/p.xml").write_text("verdorben")
     (data / "neu.txt").write_text("x")
-    assert main(["zustand", "laden", str(apk), "eingerichtet"]) == 0
+    assert main(["state", "load", str(apk), "eingerichtet"]) == 0
     assert (data / "shared_prefs/p.xml").read_text() == "eingerichtet"
     assert not (data / "neu.txt").exists()
 
 
 def test_atl_load_unknown_state_is_an_error(home, apk, capsys):
-    assert main(["zustand", "laden", str(apk), "fehlt"]) == 1
+    assert main(["state", "load", str(apk), "fehlt"]) == 1
     assert "no saved state 'fehlt'" in capsys.readouterr().err
 
 
 def test_atl_save_without_data_dir_is_an_error(home, apk, capsys):
-    assert main(["zustand", "sichern", str(apk), "x"]) == 1
+    assert main(["state", "save", str(apk), "x"]) == 1
     assert "no app data" in capsys.readouterr().err
 
 
@@ -54,8 +54,8 @@ def test_android_uses_avd_snapshot(adb, apk):  # noqa: F811
     t = json.loads((adb / "table.json").read_text())
     t["emu avd snapshot"] = ["OK\n", 0]
     (adb / "table.json").write_text(json.dumps(t))
-    assert main(["zustand", "sichern", "--android", str(apk), "eingerichtet"]) == 0
-    assert main(["zustand", "laden", "--android", str(apk), "eingerichtet"]) == 0
+    assert main(["state", "save", "--android", str(apk), "eingerichtet"]) == 0
+    assert main(["state", "load", "--android", str(apk), "eingerichtet"]) == 0
     c = calls(adb)
     assert f"emu avd snapshot save atl-doctor-{PKG}-eingerichtet" in c
     assert f"emu avd snapshot load atl-doctor-{PKG}-eingerichtet" in c
@@ -67,7 +67,7 @@ def test_android_snapshot_failure_is_an_error(adb, apk, capsys):  # noqa: F811
     t = json.loads((adb / "table.json").read_text())
     t["emu avd snapshot"] = ["KO: snapshot not found\n", 0]
     (adb / "table.json").write_text(json.dumps(t))
-    assert main(["zustand", "laden", "--android", str(apk), "x"]) == 1
+    assert main(["state", "load", "--android", str(apk), "x"]) == 1
     assert "snapshot not found" in capsys.readouterr().err
 
 
@@ -77,10 +77,10 @@ def test_android_falls_back_to_the_app_data_when_the_emulator_refuses_a_snapshot
     t["emu avd snapshot save"] = ["KO: Snapshot save is skipped. Reason: UNSUPPORTED_VK_APP\n", 0]
     t["exec-out tar"] = ["TARDATA", 0]
     (adb / "table.json").write_text(json.dumps(t))
-    assert main(["zustand", "sichern", "--android", str(apk), "angemeldet"]) == 0
+    assert main(["state", "save", "--android", str(apk), "angemeldet"]) == 0
     saved = home / f".local/share/atl-doctor/zustand/android/{PKG}/angemeldet.tar"
     assert saved.read_bytes() == b"TARDATA"
-    assert main(["zustand", "laden", "--android", str(apk), "angemeldet"]) == 0
+    assert main(["state", "load", "--android", str(apk), "angemeldet"]) == 0
     c = calls(adb)
     assert f"exec-out tar -C /data/data -cf - {PKG}" in c
     assert not any(x.startswith("emu avd snapshot load") for x in c)

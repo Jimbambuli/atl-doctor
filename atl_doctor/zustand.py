@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""App state snapshots (`atl-doctor zustand sichern|laden APK NAME`).
+"""App state snapshots (`atl-doctor state save|load APK NAME`).
 
 Under ATL the app's data directory is copied (ATL keeps it in $ANDROID_APP_DATA_DIR, else
 $XDG_DATA_HOME/android_translation_layer, inside a Flatpak below ~/.var/app/ID/data, as `<apk name>_`); the copies
@@ -66,7 +66,7 @@ def save_atl(apk: Path, name: str, launcher: str | None = None) -> Path:
 def load_atl(apk: Path, name: str, launcher: str | None = None) -> Path:
     data, store = atl_data_dir(apk, launcher), _store(apk, name)
     if not store.is_dir():
-        raise DoctorError(f"no saved state {name!r} for {Path(apk).name} (atl-doctor zustand sichern first)")
+        raise DoctorError(f"no saved state {name!r} for {Path(apk).name} (atl-doctor state save first)")
     if data.exists():
         shutil.rmtree(data)
     data.parent.mkdir(parents=True, exist_ok=True)
@@ -81,7 +81,7 @@ def _android_snapshot(action: str, package: str, name: str) -> str:
     _store(Path(package), name)  # same name rules
     serial = adb_device()
     if serial is None:
-        raise PrerequisiteMissing("zustand --android needs an emulator: no device attached (check `adb devices`)")
+        raise PrerequisiteMissing("state --android needs an emulator: no device attached (check `adb devices`)")
     adb = Adb(serial)
     snap = f"atl-doctor-{package}-{name}"
     tar = _data_home() / "atl-doctor/zustand/android" / package / f"{name}.tar"
@@ -153,7 +153,7 @@ def _reinstall_lost(adb, before: dict[str, int]) -> None:
         apks = sorted(str(a) for a in _apk_dir(pkg, vc).glob("*.apk"))
         r = adb.run("install-multiple" if len(apks) > 1 else "install", "-r", *apks, timeout=300)
         ok = r.returncode == 0
-        print(f"atl-doctor: zustand: {pkg} {'installed again' if ok else 'NOT installed again'} "
+        print(f"atl-doctor: state: {pkg} {'installed again' if ok else 'NOT installed again'} "
               f"(not in the loaded snapshot)", file=sys.stderr)
 
 
@@ -196,22 +196,34 @@ def _run(args: argparse.Namespace) -> int:
     if args.android:
         from .sources.dex import read_apk
 
-        snap = _android_snapshot("save" if args.action == "sichern" else "load", read_apk(apk).package, args.name)
+        snap = _android_snapshot("save" if args.action == "save" else "load", read_apk(apk).package, args.name)
         print(snap)
-    elif args.action == "sichern":
+    elif args.action == "save":
         print(save_atl(apk, args.name, args.launcher))
     else:
         print(load_atl(apk, args.name, args.launcher))
     return 0
 
 
-def register(sub: argparse._SubParsersAction) -> None:
-    from .cli import common_parser
+_OLD_ACTIONS = {"sichern": "save", "laden": "load"}  # the German names stay valid, hidden
 
-    p = sub.add_parser("zustand", parents=[common_parser()], help="save or load an app's state (data directory / AVD snapshot)")
-    p.add_argument("action", choices=["sichern", "laden"])
-    p.add_argument("--android", action="store_true", help="on the Android emulator (AVD snapshot over adb)")
-    p.add_argument("--launcher", metavar="CMD", help="the ATL launcher (a Flatpak keeps its data below ~/.var/app)")
-    p.add_argument("apk", metavar="APK")
-    p.add_argument("name", metavar="NAME")
-    p.set_defaults(func=_run)
+
+def _action(text: str) -> str:
+    return _OLD_ACTIONS.get(text, text)
+
+
+def register(sub: argparse._SubParsersAction) -> None:
+    from .cli import command, done
+
+    p, g = command(sub, "state", "save or load an app's state (data dir / AVD snapshot)",
+                   "Save the state of an app under a name and put it back later: its data directory under\n"
+                   "ATL, an AVD snapshot with --android. A step file can begin with start_zustand: NAME.",
+                   aliases=("zustand",))
+    g.args.add_argument("action", type=_action, choices=["save", "load"], metavar="{save,load}",
+                        help="save the state, or load a saved one")
+    g.args.add_argument("apk", metavar="APK", help="the app")
+    g.args.add_argument("name", metavar="NAME", help="name of the saved state")
+    g.input.add_argument("--android", action="store_true", help="on the Android emulator (AVD snapshot over adb)")
+    g.atl.add_argument("--launcher", metavar="CMD",
+                       help="the ATL launcher (a Flatpak keeps its data below ~/.var/app)")
+    done(p, g, _run)

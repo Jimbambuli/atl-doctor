@@ -29,13 +29,13 @@ atl-doctor \- find out why an Android app does not run correctly under Android T
 [\fB\-f\fR \fItext\fR|\fIjson\fR|\fIhtml\fR] [\fB\-o\fR \fIFILE\fR] [\fB\-\-atl\-src\fR \fIDIR\fR] [\fB\-\-prefix\fR \fIDIR\fR]
 [\fB\-\-compare\-src\fR \fIDIR\fR] [\fB\-\-aosp\fR \fIDIR\fR] [\fB\-\-sdk\-int\fR \fIN\fR] \fIAPK\fR...
 .br
-.B atl-doctor vergleich
-[\fB\-o\fR \fIDIR\fR] [\fB\-\-szenario\fR \fIFILE\fR] [\fB\-\-prefix\fR \fIDIR\fR | \fB\-\-launcher\fR \fICMD\fR] [\fB\-\-atl\-src\fR \fIDIR\fR]
-[\fB\-\-tief\fR] [\fB\-\-atl\-dir\fR \fIDIR\fR \fB\-\-android\-dir\fR \fIDIR\fR] [\fB\-\-density\fR \fID\fR] [\fB\-\-no\-aosp\-fetch\fR]
+.B atl-doctor compare
+[\fB\-o\fR \fIDIR\fR] [\fB\-\-scenario\fR \fIFILE\fR] [\fB\-\-prefix\fR \fIDIR\fR | \fB\-\-launcher\fR \fICMD\fR] [\fB\-\-atl\-src\fR \fIDIR\fR]
+[\fB\-\-deep\fR] [\fB\-\-atl\-dir\fR \fIDIR\fR \fB\-\-android\-dir\fR \fIDIR\fR] [\fB\-\-density\fR \fID\fR] [\fB\-\-no\-aosp\-fetch\fR]
 \fIAPK\fR [\fB\-\-\fR \fIATL\-ARGS\fR]
 .br
-.B atl-doctor zustand
-\fBsichern\fR|\fBladen\fR [\fB\-\-android\fR] [\fB\-\-launcher\fR \fICMD\fR] \fIAPK\fR \fINAME\fR
+.B atl-doctor state
+\fBsave\fR|\fBload\fR [\fB\-\-android\fR] [\fB\-\-launcher\fR \fICMD\fR] \fIAPK\fR \fINAME\fR
 .br
 .B atl-doctor scenario-from
 [\fB\-o\fR \fIFILE\fR] \fIRECORDING\fR
@@ -296,10 +296,10 @@ Do not download AOSP source when \fB\-\-aosp\fR is not given (default: fetch onc
 SDK_INT that ATL reports (default: the app's minSdk, at least 9).
 .RE
 .TP
-.B vergleich
+.B compare
 Record the same scenario under ATL and on Android (\fBrecord\fR and \fBrecord \-\-android\fR into
-\fIDIR\fR/atl and \fIDIR\fR/android) and write a short comparison to \fIDIR\fR/bericht.md (at most 60 lines, also on
-standard output) and \fIDIR\fR/bericht.json: likely causes first (crash, exception only on ATL through app code,
+\fIDIR\fR/atl and \fIDIR\fR/android) and write a short comparison to \fIDIR\fR/report.md (at most 60 lines, also on
+standard output) and \fIDIR\fR/report.json: likely causes first (crash, exception only on ATL through app code,
 lifecycle difference, native library or symbol missing, missing method, exception only on ATL inside the platform,
 stub whose result is used, EGL/audio error, other stubs, screenshots that differ; a candidate first seen while
 the app starts, before the first mark, ranks lower), then stubs hit by count with their caller, exceptions only on ATL, lifecycle
@@ -308,9 +308,9 @@ differences, missing native pieces and the screenshots of each step compared (wo
 .RS
 .TP
 .BR \-o ", " \-\-output " \fIDIR\fR"
-Output directory (default: ./atl\-doctor\-vergleich\-YYYYmmdd\-HHMMSS).
+Output directory (default: ./atl\-doctor\-compare\-<time>).
 .TP
-.BI \-\-szenario " FILE"
+.BI \-\-scenario " FILE"
 Step file for both sides (default: wait 15 s, then one screenshot).
 .TP
 .BI \-\-prefix " DIR"
@@ -322,7 +322,7 @@ Start ATL with \fICMD\fR instead, as for \fBrecord\fR.
 .BI \-\-atl\-src " DIR"
 ATL source tree for the stub list (default: $ATL_DOCTOR_ATL_SRC).
 .TP
-.B \-\-tief
+.B \-\-deep
 Record ATL with the full method trace and the agent from the start. Without it the recording is light
 (\fBrecord \-\-light\fR): the runtime is not made debuggable, because that forces the interpreter and changes
 the timing.
@@ -350,8 +350,8 @@ characters. It goes to \fB\-o\fR \fIFILE\fR or to standard output.
 Write the step file here.
 .RE
 .TP
-.B zustand
-\fBzustand sichern\fR \fIAPK NAME\fR saves the app's state, \fBzustand laden\fR \fIAPK NAME\fR puts it back.
+.B state
+\fBstate save\fR \fIAPK NAME\fR saves the app's state, \fBstate load\fR \fIAPK NAME\fR puts it back.
 Under ATL that is a copy of the app's data directory ($ANDROID_APP_DATA_DIR, else
 $XDG_DATA_HOME/android_translation_layer, for a Flatpak launcher ~/.var/app/\fIID\fR/data/android_translation_layer;
 the directory is \fIapk name\fR_), kept in $XDG_DATA_HOME/atl\-doctor/zustand.
@@ -397,8 +397,8 @@ is one, and the report says \fBnot found\fR for this step. Each tap, click, key,
 no key for (umlauts, for example) and characters outside the Basic Multilingual Plane (emoji) cannot be typed
 and fail the step.
 .PP
-A step file may begin with \fBstart_zustand:\fR \fINAME\fR: \fBrecord\fR (and \fBvergleich\fR) first loads the
-state saved with \fBzustand sichern\fR, under ATL and on Android.
+A step file may begin with \fBstart_zustand:\fR \fINAME\fR: \fBrecord\fR (and \fBcompare\fR) first loads the
+state saved with \fBstate save\fR, under ATL and on Android.
 .PP
 The same file runs under ATL and on Android, so the two recordings can be compared step by step.
 Error messages carry file name and line number.

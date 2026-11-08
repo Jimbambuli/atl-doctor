@@ -1,0 +1,17 @@
+usage: atl-doctor check [--android] [--prefix DIR] [--atl-src DIR]
+                        [--aosp DIR] [-h] [-q] [-v]
+
+Check what can be measured on this machine and say how to fix what is missing.
+
+Input:
+  --android      also check adb and the Android device
+
+ATL environment:
+  --prefix DIR   ATL installation prefix (default: $ATL_DOCTOR_PREFIX)
+  --atl-src DIR  ATL source tree (default: $ATL_DOCTOR_ATL_SRC)
+  --aosp DIR     AOSP source tree (default: $ATL_DOCTOR_AOSP)
+
+General:
+  -h, --help     show this help and exit
+  -q, --quiet    only errors on stderr
+  -v, --verbose  more messages on stderr

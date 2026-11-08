@@ -617,36 +617,44 @@ def _run_mark(args: argparse.Namespace) -> int:
     return send_mark(Path(args.dir) if args.dir else _newest_capture(), args.text)
 
 
-def register(sub: argparse._SubParsersAction) -> None:
-    from .cli import common_parser
+def register(sub) -> None:
+    from .cli import alias, command, done
 
-    p = sub.add_parser("record", help="record an app under ATL until it ends or SIGINT", parents=[common_parser()])
-    p.add_argument("-o", "--output", metavar="DIR", help="capture directory (default: ./atl-doctor-YYYYmmdd-HHMMSS)")
-    p.add_argument("--prefix", metavar="DIR", help="ATL installation prefix (default: $ATL_DOCTOR_PREFIX)")
-    p.add_argument("--launcher", metavar="CMD",
-                   help="start ATL with this command (APK and ATL-ARGS appended) instead of a prefix, e.g. 'flatpak run ID'")
-    p.add_argument("--atl-src", metavar="DIR", help="ATL source tree for the stub list (default: $ATL_DOCTOR_ATL_SRC)")
-    p.add_argument("--agent", metavar="PATH", help="JVMTI agent library (default: $ATL_DOCTOR_AGENT, then the helper dirs)")
-    p.add_argument("--headless", action="store_true",
-                   help="run ATL in a private invisible KWin session (kwin_wayland --virtual)")
-    p.add_argument("--steps", metavar="FILE", help="drive the app with a step file; implies --headless under ATL")
-    p.add_argument("--no-trace", dest="trace", action="store_false",
-                   help="no method trace: the app runs at full speed, but the report has no stub hits")
-    p.add_argument("--light", action="store_true",
-                   help="fast recording: agent attached after start (ATL --attach-agent), stub hits counted by ATL, "
-                        "time line from ART's sampling profiler instead of a full method trace (needs a recent ATL)")
-    p.add_argument("--heap", action="store_true",
-                   help="count instances and bytes per class at every mark (agent; slow, forces a GC per mark)")
-    p.add_argument("--android", action="store_true",
-                   help="record the same app on an Android device over adb (own capture directory)")
-    p.add_argument("--input", action="store_true",
-                   help="with --android: also record what is done on the device (touches, keys) into input.jsonl; "
-                        "under ATL input.jsonl comes from the agent whenever views were clicked")
-    p.add_argument("apk", metavar="APK")
-    p.add_argument("atl_args", nargs="*", metavar="ATL-ARGS", help="after --: passed to android-translation-layer")
-    p.set_defaults(func=_run_record)
+    p, g = command(sub, "record", "record an app under ATL (or on Android) into a capture",
+                   "Run APK under android-translation-layer with the agent and write a capture directory\n"
+                   "(trace, log, screenshots, steps). It ends when the app ends or on Ctrl-C.")
+    g.args.add_argument("apk", metavar="APK", help="the app to record")
+    g.args.add_argument("atl_args", nargs="*", metavar="ATL-ARGS",
+                        help="arguments for android-translation-layer, after --")
+    g.input.add_argument("--steps", metavar="FILE", help="drive the app with a step file (implies --headless under ATL)")
+    g.input.add_argument("--android", action="store_true",
+                         help="record the same app on an Android device over adb (own capture directory)")
+    g.input.add_argument("--input", action="store_true",
+                         help="with --android: also record what is done on the device (touches, keys) into "
+                              "input.jsonl; under ATL the agent writes input.jsonl whenever views were clicked")
+    g.output.add_argument("-o", "--output", metavar="DIR",
+                          help="capture directory (default: ./atl-doctor-YYYYmmdd-HHMMSS)")
+    g.atl.add_argument("--prefix", metavar="DIR", help="ATL installation prefix (default: $ATL_DOCTOR_PREFIX)")
+    g.atl.add_argument("--launcher", metavar="CMD",
+                       help="start ATL with this command (APK and ATL-ARGS appended) instead of a prefix, "
+                            "e.g. 'flatpak run ID'")
+    g.atl.add_argument("--atl-src", metavar="DIR", help="ATL source tree for the stub list (default: $ATL_DOCTOR_ATL_SRC)")
+    g.atl.add_argument("--agent", metavar="PATH",
+                       help="JVMTI agent library (default: $ATL_DOCTOR_AGENT, then the helper directories)")
+    g.atl.add_argument("--headless", action="store_true",
+                       help="run ATL in a private invisible KWin session (kwin_wayland --virtual)")
+    g.advanced.add_argument("--no-trace", dest="trace", action="store_false",
+                            help="no method trace: the app runs at full speed, but the report has no stub hits")
+    g.advanced.add_argument("--light", action="store_true",
+                            help="fast recording: agent attached after the start (ATL --attach-agent), stub hits "
+                                 "counted by ATL, time line from ART's sampling profiler instead of a full method "
+                                 "trace (needs a recent ATL)")
+    g.advanced.add_argument("--heap", action="store_true",
+                            help="count instances and bytes per class at every mark (agent; slow, forces a GC per mark)")
+    done(p, g, _run_record)
 
-    p = sub.add_parser("mark", help="start a new phase in the running recording", parents=[common_parser()])
-    p.add_argument("-d", "--dir", metavar="DIR", help="capture directory (default: the newest ./atl-doctor-*)")
-    p.add_argument("text", nargs="?", metavar="TEXT", help="phase name (default: 'mark N')")
-    p.set_defaults(func=_run_mark)
+    p, g = command(sub, "mark", "start a new phase in the running recording",
+                   "Tell a running recording that a new phase begins (from another terminal).")
+    g.args.add_argument("text", nargs="?", metavar="TEXT", help="phase name (default: 'mark N')")
+    g.input.add_argument("-d", "--dir", metavar="DIR", help="capture directory (default: the newest ./atl-doctor-*)")
+    done(p, g, _run_mark)

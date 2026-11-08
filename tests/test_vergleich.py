@@ -83,7 +83,7 @@ def test_markdown_is_short_with_many_findings(pair, tmp_path):
     md = render_markdown(d)
     assert len(md.splitlines()) <= MAX_LINES
     assert max(len(x) for x in md.splitlines()) <= 240
-    assert md.splitlines()[0].startswith("# atl-doctor vergleich")
+    assert md.splitlines()[0].startswith("# atl-doctor compare")
     assert "## Likely causes" in md and md.index("## Likely causes") < md.index("## Stubs hit")
 
 
@@ -100,14 +100,14 @@ def test_shot_steps_are_compared(pair, tmp_path):
 
 def test_cli_with_existing_captures_writes_report(pair, tmp_path, capsys):
     out = tmp_path / "v"
-    assert main(["vergleich", "--atl-dir", str(pair[0]), "--android-dir", str(pair[1]), "-o", str(out),
+    assert main(["compare", "--atl-dir", str(pair[0]), "--android-dir", str(pair[1]), "-o", str(out),
                  "--no-aosp-fetch", "unused.apk"]) == 0
-    md = (out / "bericht.md").read_text()
+    md = (out / "report.md").read_text()
     assert capsys.readouterr().out == md
-    assert json.loads((out / "bericht.json").read_text())["causes"]
+    assert json.loads((out / "report.json").read_text())["causes"]
 
 
-def test_cli_records_light_by_default_and_full_with_tief(tmp_path, monkeypatch, pair):
+def test_cli_records_light_by_default_and_full_with_deep(tmp_path, monkeypatch, pair):
     import atl_doctor.vergleich as v
 
     seen = []
@@ -125,11 +125,11 @@ def test_cli_records_light_by_default_and_full_with_tief(tmp_path, monkeypatch, 
     monkeypatch.setattr(v, "build_comparison", lambda *a, **k: {"causes": [], "app": APP})
     steps = tmp_path / "s.steps"
     steps.write_text("wait 0\n")
-    assert main(["vergleich", "-o", str(tmp_path / "a"), "--prefix", str(tmp_path), "--szenario", str(steps),
+    assert main(["compare", "-o", str(tmp_path / "a"), "--prefix", str(tmp_path), "--scenario", str(steps),
                  "x.apk"]) == 0
-    assert main(["vergleich", "-o", str(tmp_path / "b"), "--launcher", "flatpak run X", "--tief", "x.apk"]) == 0
+    assert main(["compare", "-o", str(tmp_path / "b"), "--launcher", "flatpak run X", "--deep", "x.apk"]) == 0
     assert seen[0] == ("atl", True, True, steps, None) and seen[1] == ("android", steps)
-    default = tmp_path / "b/szenario.steps"                     # without --szenario: wait, then one screenshot
+    default = tmp_path / "b/scenario.steps"                     # without --scenario: wait, then one screenshot
     assert seen[2] == ("atl", False, True, default, "flatpak run X") and "screenshot" in default.read_text()
 
 
@@ -159,8 +159,8 @@ def test_scenario_errors_are_in_the_report(tmp_path, monkeypatch, pair):
     import shutil
     shutil.copytree(pair[0], tmp_path / "v/atl")
     shutil.copytree(pair[1], tmp_path / "v/android")
-    assert main(["vergleich", "-o", str(tmp_path / "v"), "--prefix", str(tmp_path), "--no-aosp-fetch", "x.apk"]) == 0
-    md = (tmp_path / "v/bericht.md").read_text()
+    assert main(["compare", "-o", str(tmp_path / "v"), "--prefix", str(tmp_path), "--no-aosp-fetch", "x.apk"]) == 0
+    md = (tmp_path / "v/report.md").read_text()
     assert "Scenario stopped on ATL: s.steps:13: no visible view matches id/suw_navbar_done" in md.splitlines()[2]
 
 

@@ -1,0 +1,45 @@
+usage: atl-doctor report [--log FILE] [--density D] [-f {text,json,html}]
+                         [-o FILE] [--fail-on CLASS[,CLASS]] [--atl-src DIR]
+                         [--aosp DIR] [--no-aosp-fetch] [--jank-min-frames N]
+                         [-h] [-q] [-v]
+                         [DIR ...]
+
+Evaluate a capture directory (or an APK Starter archive, or a log) into a
+report of findings. With a second, Android capture the two sides are compared.
+
+Arguments:
+  DIR                     capture directory or APK Starter archive (.tar.gz),
+                          then optionally the Android capture directory
+
+Input:
+  --log FILE              log mode: one log file per phase (repeatable)
+  --density D             Android display density (dp scale) for the tree
+                          comparison (default: from the Android capture)
+
+Output:
+  -f, --format {text,json,html}
+                          report format (default: text)
+  -o, --output FILE       write to FILE instead of stdout
+  --fail-on CLASS[,CLASS]
+                          exit 4 if a finding of one of these classes exists
+                          (crash, missing, exception-atl-only, stub-result-
+                          used, system-answer, tree-visible, memory-growth,
+                          render, lifecycle, jank, other)
+
+ATL environment:
+  --atl-src DIR           ATL source tree; match logged stub messages against
+                          its stub list (default: $ATL_DOCTOR_ATL_SRC)
+  --aosp DIR              AOSP source tree (root or frameworks/base) to
+                          compare stubs and missing methods with (default:
+                          $ATL_DOCTOR_AOSP)
+
+Advanced:
+  --no-aosp-fetch         do not download AOSP source when --aosp is not given
+                          (default: fetch once into the cache)
+  --jank-min-frames N     fewest frames a phase needs for a jank finding
+                          (default: 30); fewer is noted, not reported
+
+General:
+  -h, --help              show this help and exit
+  -q, --quiet             only errors on stderr
+  -v, --verbose           more messages on stderr

@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""`atl-doctor vergleich APK`: the same scenario under ATL and on Android, and a short report of the differences.
+"""`atl-doctor compare APK`: the same scenario under ATL and on Android, and a short report of the differences.
 
-Records both sides (record and record --android), pairs them like `report DIR ANDROID-DIR` and writes OUT/bericht.md
-(at most MAX_LINES lines, likely causes first) and OUT/bericht.json. Under ATL the recording is light by default
-(no debuggable runtime, the app keeps its speed); --tief records with the full method trace and the agent from
+Records both sides (record and record --android), pairs them like `report DIR ANDROID-DIR` and writes OUT/report.md
+(at most MAX_LINES lines, likely causes first) and OUT/report.json. Under ATL the recording is light by default
+(no debuggable runtime, the app keeps its speed); --deep records with the full method trace and the agent from
 the start, which forces the interpreter and changes the timing.
 """
 from __future__ import annotations
@@ -124,7 +124,7 @@ def _t(title: str, n: int = 120) -> str:
 
 
 def render_markdown(d: dict) -> str:
-    out = [f"# atl-doctor vergleich: {d.get('app') or '?'}",
+    out = [f"# atl-doctor compare: {d.get('app') or '?'}",
            f"ATL `{d.get('atl')}` ({d.get('mode') or 'full trace'}) / Android `{d.get('android')}`"
            + (f", start state `{d['start_state']}`" if d.get("start_state") else "")]
     out += [f"Scenario stopped on {side}: {msg}" for side, msg in (d.get("errors") or {}).items()]
@@ -138,7 +138,7 @@ def render_markdown(d: dict) -> str:
         if not rows:
             out.append("none")
         elif len(rows) > CAPS[key]:
-            out.append(f"... {len(rows) - CAPS[key]} more in bericht.json")
+            out.append(f"... {len(rows) - CAPS[key]} more in report.json")
 
     section("Likely causes", "causes", lambda i, c: f"{i}. [{c['kind']}] {_t(c['title'])}"
             + (f" ({c['count']}x)" if c["count"] > 1 else "") + (f" <- {c['where']}" if c["where"] else "")
@@ -163,15 +163,15 @@ def _record(args: argparse.Namespace, out: Path, errors: dict[str, str]) -> tupl
         raise UsageError("--launcher and --prefix exclude each other")
     prefix = None if args.launcher else resolve(args.prefix, "ATL_DOCTOR_PREFIX")
     atl_src = resolve(args.atl_src, "ATL_DOCTOR_ATL_SRC")
-    steps = Path(args.szenario) if args.szenario else None
+    steps = Path(args.scenario) if args.scenario else None
     if steps is None:
         out.mkdir(parents=True, exist_ok=True)
-        steps = out / "szenario.steps"
+        steps = out / "scenario.steps"
         steps.write_text(DEFAULT_SCENARIO, encoding="utf-8")
     atl, android = out / "atl", out / "android"
     for side, run in (("ATL", lambda: record_atl(RecordOptions(
             apk=Path(args.apk), out=atl, prefix=Path(prefix) if prefix else None, launcher=args.launcher,
-            atl_src=Path(atl_src) if atl_src else None, agent=None, steps=steps, light=not args.tief,
+            atl_src=Path(atl_src) if atl_src else None, agent=None, steps=steps, light=not args.deep,
             atl_args=list(args.atl_args)))),
                       ("Android", lambda: record_android(RecordOptions(
             apk=Path(args.apk), out=android, prefix=Path(prefix) if prefix else None, atl_src=None, agent=None,
@@ -185,7 +185,7 @@ def _record(args: argparse.Namespace, out: Path, errors: dict[str, str]) -> tupl
 
 
 def _run(args: argparse.Namespace) -> int:
-    out = Path(args.output or f"atl-doctor-vergleich-{datetime.now():%Y%m%d-%H%M%S}")
+    out = Path(args.output or f"atl-doctor-compare-{datetime.now():%Y%m%d-%H%M%S}")
     if bool(args.atl_dir) != bool(args.android_dir):
         raise UsageError("--atl-dir and --android-dir go together")
     errors: dict[str, str] = {}
@@ -196,29 +196,38 @@ def _run(args: argparse.Namespace) -> int:
     d = build_comparison(atl, android, out, args.density, args.no_aosp_fetch)
     d["errors"] = errors
     out.mkdir(parents=True, exist_ok=True)
-    (out / "bericht.json").write_text(json.dumps(d, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    (out / "report.json").write_text(json.dumps(d, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     md = render_markdown(d)
-    (out / "bericht.md").write_text(md, encoding="utf-8")
+    (out / "report.md").write_text(md, encoding="utf-8")
     print(md, end="")
     return 0
 
 
 def register(sub: argparse._SubParsersAction) -> None:
-    from .cli import common_parser
+    from .cli import alias, command, done
 
-    p = sub.add_parser("vergleich", parents=[common_parser()],
-                       help="record the same scenario under ATL and on Android and report the differences")
-    p.add_argument("-o", "--output", metavar="DIR", help="output directory (default: ./atl-doctor-vergleich-TIME)")
-    p.add_argument("--szenario", metavar="FILE", help=f"step file for both sides (default: {DEFAULT_SCENARIO!r})")
-    p.add_argument("--prefix", metavar="DIR", help="ATL installation prefix (default: $ATL_DOCTOR_PREFIX)")
-    p.add_argument("--launcher", metavar="CMD", help="start ATL with CMD instead (e.g. a Flatpak), see record")
-    p.add_argument("--atl-src", metavar="DIR", help="ATL source tree for the stub list (default: $ATL_DOCTOR_ATL_SRC)")
-    p.add_argument("--tief", action="store_true",
-                   help="full method trace and agent from the start (debuggable: interpreter, timing changes)")
-    p.add_argument("--atl-dir", metavar="DIR", help="compare this ATL capture instead of recording")
-    p.add_argument("--android-dir", metavar="DIR", help="compare this Android capture instead of recording")
-    p.add_argument("--density", type=float, metavar="D", help="Android screen density (default: from the capture)")
-    p.add_argument("--no-aosp-fetch", action="store_true", help="do not download AOSP source (see report)")
-    p.add_argument("apk", metavar="APK")
-    p.add_argument("atl_args", nargs="*", metavar="ATL-ARGS", help="after --: passed to android-translation-layer")
-    p.set_defaults(func=_run)
+    p, g = command(sub, "compare", "record under ATL and on Android, report the differences",
+                   "Record the same scenario under ATL and on an Android device and write a short report of\n"
+                   "the differences (OUT/report.md, OUT/report.json).", aliases=("vergleich",))
+    g.args.add_argument("apk", metavar="APK", help="the app to record")
+    g.args.add_argument("atl_args", nargs="*", metavar="ATL-ARGS",
+                        help="arguments for android-translation-layer, after --")
+    g.input.add_argument("--scenario", metavar="FILE",
+                         help="step file for both sides (default: wait 15 s, then one screenshot \"start\")")
+    alias(g.input, "--szenario", "--scenario")
+    g.input.add_argument("--atl-dir", metavar="DIR", help="compare this ATL capture instead of recording")
+    g.input.add_argument("--android-dir", metavar="DIR", help="compare this Android capture instead of recording")
+    g.input.add_argument("--density", type=float, metavar="D",
+                         help="Android screen density (default: from the capture)")
+    g.output.add_argument("-o", "--output", metavar="DIR",
+                          help="output directory (default: ./atl-doctor-compare-<time>)")
+    g.atl.add_argument("--prefix", metavar="DIR", help="ATL installation prefix (default: $ATL_DOCTOR_PREFIX)")
+    g.atl.add_argument("--launcher", metavar="CMD",
+                       help="start ATL with CMD instead of a prefix (e.g. a Flatpak), as for record")
+    g.atl.add_argument("--atl-src", metavar="DIR", help="ATL source tree for the stub list (default: $ATL_DOCTOR_ATL_SRC)")
+    g.advanced.add_argument("--deep", action="store_true",
+                            help="full method trace and agent from the start (debuggable app: interpreter, "
+                                 "timing changes)")
+    alias(g.advanced, "--tief", "--deep")
+    g.advanced.add_argument("--no-aosp-fetch", action="store_true", help="do not download AOSP source (see report)")
+    done(p, g, _run)

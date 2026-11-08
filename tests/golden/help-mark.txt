@@ -1,0 +1,14 @@
+usage: atl-doctor mark [-d DIR] [-h] [-q] [-v] [TEXT]
+
+Tell a running recording that a new phase begins (from another terminal).
+
+Arguments:
+  TEXT           phase name (default: 'mark N')
+
+Input:
+  -d, --dir DIR  capture directory (default: the newest ./atl-doctor-*)
+
+General:
+  -h, --help     show this help and exit
+  -q, --quiet    only errors on stderr
+  -v, --verbose  more messages on stderr

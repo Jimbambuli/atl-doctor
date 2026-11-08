@@ -415,10 +415,13 @@ def _run_scenario_from(args) -> int:
 
 
 def register(sub) -> None:
-    from .cli import common_parser
+    from .cli import command, done
 
-    p = sub.add_parser("scenario-from", help="make a step file from a recorded input (input.jsonl)",
-                       parents=[common_parser()])
-    p.add_argument("-o", "--output", metavar="FILE", help="write the step file here (default: standard output)")
-    p.add_argument("recording", metavar="RECORDING", help="a capture directory with input.jsonl, or the file itself")
-    p.set_defaults(func=_run_scenario_from)
+    p, g = command(sub, "scenario-from", "make a step file from a recorded input",
+                   "Turn the input recorded in input.jsonl (record --input) into a step file that can be\n"
+                   "replayed under ATL and on Android.")
+    g.args.add_argument("recording", metavar="RECORDING",
+                        help="a capture directory with input.jsonl, or the file itself")
+    g.output.add_argument("-o", "--output", metavar="FILE",
+                          help="write the step file here (default: standard output)")
+    done(p, g, _run_scenario_from)

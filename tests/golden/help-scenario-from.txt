@@ -1,0 +1,15 @@
+usage: atl-doctor scenario-from [-o FILE] [-h] [-q] [-v] RECORDING
+
+Turn the input recorded in input.jsonl (record --input) into a step file that
+can be replayed under ATL and on Android.
+
+Arguments:
+  RECORDING          a capture directory with input.jsonl, or the file itself
+
+Output:
+  -o, --output FILE  write the step file here (default: standard output)
+
+General:
+  -h, --help         show this help and exit
+  -q, --quiet        only errors on stderr
+  -v, --verbose      more messages on stderr

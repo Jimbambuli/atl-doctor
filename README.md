@@ -51,15 +51,18 @@ atl-doctor report run1 android-run1                   # ATL against Android, pha
 atl-doctor report --log crash.log                     # evaluate an ATL log without a recording
 atl-doctor explain -d run1 3f2a                       # everything about one finding (short ID)
 atl-doctor diff before.json after.json --fail-on new  # after a fix: new, gone, changed; exit 4 for CI
-atl-doctor vergleich -o v1 --prefix ~/.local/opt/atl --szenario s.steps app.apk
-                                                      # same scenario under ATL and on Android: v1/bericht.md
-                                                      # (<= 60 lines, likely causes first) and v1/bericht.json
-atl-doctor zustand sichern app.apk eingerichtet       # app data (ATL) or AVD snapshot (--android) by name;
-                                                      # a step file can begin with `start_zustand: eingerichtet`
+atl-doctor compare -o v1 --prefix ~/.local/opt/atl --scenario s.steps app.apk
+                                                      # same scenario under ATL and on Android: v1/report.md
+                                                      # (<= 60 lines, likely causes first) and v1/report.json
+atl-doctor state save app.apk ready                 # app data (ATL) or AVD snapshot (--android) by name;
+                                                      # a step file can begin with `start_zustand: ready`
 atl-doctor record --android --input -o android-run app.apk  # what is done on the device -> android-run/input.jsonl (ATL: input.jsonl comes from the agent)
 atl-doctor scenario-from android-run -o s.steps       # a step file with `tap id/NAME "Text" path:.. rect:..`, replayable under ATL and on Android
 atl-doctor report atl-run android-run                 # with replay.jsonl on both sides: "Replayed input", target found yes/no, tree after each step
 ```
+
+The older German names `vergleich`, `zustand` (`sichern`/`laden`), `--szenario` and `--tief` still work but are no longer
+listed in `--help`.
 
 With screenshots (`--headless`/`--steps`) the report also lists *rendering defects* (class `render`, with the view's
 ID/path, rectangle and a picture cut from the screenshot): unreadable text (WCAG contrast of the measured text colour

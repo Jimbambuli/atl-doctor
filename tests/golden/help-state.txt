@@ -1,0 +1,22 @@
+usage: atl-doctor state [--android] [--launcher CMD] [-h] [-q] [-v]
+                        {save,load} APK NAME
+
+Save the state of an app under a name and put it back later: its data
+directory under ATL, an AVD snapshot with --android. A step file can begin
+with start_zustand: NAME.
+
+Arguments:
+  {save,load}     save the state, or load a saved one
+  APK             the app
+  NAME            name of the saved state
+
+Input:
+  --android       on the Android emulator (AVD snapshot over adb)
+
+ATL environment:
+  --launcher CMD  the ATL launcher (a Flatpak keeps its data below ~/.var/app)
+
+General:
+  -h, --help      show this help and exit
+  -q, --quiet     only errors on stderr
+  -v, --verbose   more messages on stderr

@@ -202,12 +202,12 @@ def _run_check(args: argparse.Namespace) -> int:
 
 
 def register(sub: argparse._SubParsersAction) -> None:
-    from .cli import common_parser
+    from .cli import command, done
 
-    p = sub.add_parser("check", help="check the environment and say how to fix what is missing",
-                       parents=[common_parser()])
-    p.add_argument("--prefix", metavar="DIR", help="ATL installation prefix (default: $ATL_DOCTOR_PREFIX)")
-    p.add_argument("--atl-src", metavar="DIR", help="ATL source tree (default: $ATL_DOCTOR_ATL_SRC)")
-    p.add_argument("--aosp", metavar="DIR", help="AOSP source tree (default: $ATL_DOCTOR_AOSP)")
-    p.add_argument("--android", action="store_true", help="also check adb and the Android device")
-    p.set_defaults(func=_run_check)
+    p, g = command(sub, "check", "check the environment, say how to fix what is missing",
+                   "Check what can be measured on this machine and say how to fix what is missing.")
+    g.input.add_argument("--android", action="store_true", help="also check adb and the Android device")
+    g.atl.add_argument("--prefix", metavar="DIR", help="ATL installation prefix (default: $ATL_DOCTOR_PREFIX)")
+    g.atl.add_argument("--atl-src", metavar="DIR", help="ATL source tree (default: $ATL_DOCTOR_ATL_SRC)")
+    g.atl.add_argument("--aosp", metavar="DIR", help="AOSP source tree (default: $ATL_DOCTOR_AOSP)")
+    done(p, g, _run_check)

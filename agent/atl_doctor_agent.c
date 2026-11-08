@@ -13,7 +13,7 @@
  *        nolc          no lifecycle
  *        nosys         no system answers (Q lines at every mark) and no broadcast hooks (B lines)
  *        noexit        no exit hooks (breakpoints in System.exit, Runtime.exit, Runtime.halt)
- *        noinput       no input hooks (breakpoints in View.performClick and View.performLongClick, T lines)
+ *        noinput       no input hooks (breakpoints in ATL's InputTrace, else in View.performClick and View.performLongClick; T lines)
  *        arm=FILE      set the lifecycle breakpoints only once FILE exists (breakpoints right at start make some
  *                      apps lose start-up races; exceptions are recorded from the start anyway)
  *        late=PLUGIN   load the JVMTI plugin itself latesec seconds after start (like Android's attach-agent): the
@@ -70,7 +70,12 @@
  *        TextView text and content description (never the text of an EditText), left..bottom = rectangle in window
  *        pixels relative to the content view (android:id/content), path = child indices from the content view down
  *        ("0/2/1"; "-" when the view has no content view above it, then the rectangle is relative to the window).
- *        Needs the lifecycle breakpoints (not with nolc). performClick also runs for clicks the app makes itself
+ *        Needs the lifecycle breakpoints (not with nolc). performClick also runs for clicks the app makes itself; ATL builds
+ *        with android.atl.InputTrace (empty static hooks at the places where GTK input reaches the app) report only what the
+ *        user does, and the agent then ignores performClick: kind tap/long-tap (userTouch), text (textChanged: the text
+ *        column holds the length, never the text), scroll (the text column holds "dx,dy" in pixels, a wheel step is 100,
+ *        positive dy = content moves up) and key (no view, the text column holds "keyCode,action" of KeyEvent; only the
+ *        keys no view consumed, BACK among them)
  */
 #define _GNU_SOURCE
 #include <jvmti.h>
@@ -307,7 +312,7 @@ static void set_exit_hooks(JNIEnv *jni) {
 }
 
 /* ---------- lifecycle via breakpoints ---------- */
-enum { G_ACT = 1, G_WIN = 2, G_FRAG = 4, G_VIEW = 8, G_REG = 16, G_RCV = 32, G_CLICK = 64 };
+enum { G_ACT = 1, G_WIN = 2, G_FRAG = 4, G_VIEW = 8, G_REG = 16, G_RCV = 32, G_CLICK = 64, G_ITRACE = 128 };
 static const char *n_act[] = { "onCreate", "onStart", "onRestart", "onResume", "onPostCreate", "onPostResume", "onPause",
 	"onStop", "onDestroy", "onConfigurationChanged", "onSaveInstanceState", "onRestoreInstanceState", "onNewIntent",
 	"onUserLeaveHint", "onTopResumedActivityChanged", "onMultiWindowModeChanged", "onBackPressed", NULL };
@@ -333,6 +338,8 @@ static int32_t bp_find(jmethodID m) {
 static jclass k_activity, k_wincb, k_fragment, k_view, k_context, k_receiver, k_textview, k_edittext;   /* global refs once loaded */
 static void bcast_hit(JNIEnv *jni, jthread th, jmethodID m, uint8_t g);
 static void click_hit(JNIEnv *jni, jthread th, jmethodID m);
+static void trace_hit(JNIEnv *jni, jthread th, jmethodID m);
+static uint8_t have_trace;   /* ATL's android.atl.InputTrace exists: its hooks replace the performClick breakpoints */
 static void scan_early_receivers(JNIEnv *jni);
 
 static void JNICALL cb_breakpoint(jvmtiEnv *je, JNIEnv *jni, jthread th, jmethodID m, jlocation loc) {
@@ -346,6 +353,7 @@ static void JNICALL cb_breakpoint(jvmtiEnv *je, JNIEnv *jni, jthread th, jmethod
 	pthread_mutex_unlock(&bp_lock);
 	if (g & (G_REG | G_RCV)) { bcast_hit(jni, th, m, g); in_callback = 0; return; }
 	if (g & G_CLICK) { click_hit(jni, th, m); in_callback = 0; return; }
+	if (g & G_ITRACE) { trace_hit(jni, th, m); in_callback = 0; return; }
 	jvmtiFrameInfo fr[2]; jint cnt = 0;
 	(*J)->GetStackTrace(J, th, 0, 2, fr, &cnt);
 	struct mc *e0 = method(m), *e1 = cnt > 1 ? method(fr[1].method) : NULL;
@@ -405,6 +413,7 @@ static void check_class(JNIEnv *jni, jclass k) {
 	if (opt_input && !k_edittext && !strcmp(s, "Landroid/widget/EditText;")) k_edittext = (*jni)->NewGlobalRef(jni, k);
 	if (opt_sys && !k_context && !strcmp(s, "Landroid/content/Context;")) k_context = (*jni)->NewGlobalRef(jni, k);
 	if (opt_sys && !k_receiver && !strcmp(s, "Landroid/content/BroadcastReceiver;")) k_receiver = (*jni)->NewGlobalRef(jni, k);
+	uint8_t is_trace = opt_input && !strcmp(s, "Landroid/atl/InputTrace;");
 	(*J)->Deallocate(J, (unsigned char *)s);
 	/* no breakpoints in interfaces (Window$Callback itself): a breakpoint in a default method makes ART deoptimize
 	   every method of the runtime (DeoptManager::AddMethodBreakpoint), the app then runs interpreted (JW Library:
@@ -421,12 +430,14 @@ static void check_class(JNIEnv *jni, jclass k) {
 	if (opt_input && k_view && (*jni)->IsSameObject(jni, k, k_view)) g |= G_CLICK;
 	if (opt_sys && is_subclass(jni, k, k_context)) g |= G_REG;
 	if (opt_sys && is_subclass(jni, k, k_receiver)) g |= G_RCV;
+	if (is_trace) { g |= G_ITRACE; have_trace = 1; }
 	if (!g) return;
 	jint mn = 0; jmethodID *ms = NULL;
 	if ((*J)->GetClassMethods(J, k, &mn, &ms) != JVMTI_ERROR_NONE) return;
 	for (jint i = 0; i < mn; i++) {
 		jint mod = 0; (*J)->GetMethodModifiers(J, ms[i], &mod);
-		if (mod & (0x0400 /*abstract*/ | 0x0100 /*native*/ | 0x0008 /*static*/)) continue;
+		if (mod & (0x0400 /*abstract*/ | 0x0100 /*native*/)) continue;
+		if ((mod & 0x0008 /*static*/) != (is_trace ? 0x0008 : 0)) continue;   /* InputTrace: only its static hooks */
 		/* ART lists the default methods a class inherits (Window$Callback.onPointerCaptureChanged) among its own;
 		   a breakpoint there deoptimizes every method (see above): only methods the class declares itself */
 		jclass dk = NULL;
@@ -449,6 +460,7 @@ static void check_class(JNIEnv *jni, jclass k) {
 			char *sg = NULL; (*J)->GetMethodName(J, ms[i], NULL, &sg, NULL);
 			if (sg) { if (!strcmp(sg, "()Z")) mg |= G_CLICK; (*J)->Deallocate(J, (unsigned char *)sg); }
 		}
+		if ((g & G_ITRACE) && (!strcmp(e->name, "userTouch") || !strcmp(e->name, "textChanged") || !strcmp(e->name, "key") || !strcmp(e->name, "scroll"))) mg |= G_ITRACE;
 		if ((g & G_ACT) && in_list(n_act, e->name)) mg |= G_ACT;
 		if ((g & G_WIN) && in_list(n_win, e->name)) mg |= G_WIN;
 		if ((g & G_FRAG) && in_list(n_frag, e->name)) mg |= G_FRAG;
@@ -495,6 +507,10 @@ static void arm(JNIEnv *jni) {
 	if (ks) { for (jint i = 0; i < n; i++) (*jni)->DeleteLocalRef(jni, ks[i]); (*J)->Deallocate(J, (unsigned char *)ks); }
 	char z[64]; snprintf(z, sizeof z, "%u", bp_count); info("armed, breakpoints %s", z);
 	if (opt_sys) scan_early_receivers(jni);
+	if (opt_input && !have_trace) {   /* ATL's input hooks: load the class so that its class-prepare event sets the breakpoints */
+		jclass tk = (*jni)->FindClass(jni, "android/atl/InputTrace");
+		if (tk) (*jni)->DeleteLocalRef(jni, tk); else (*jni)->ExceptionClear(jni);
+	}
 }
 /* arm=FILE: set the lifecycle breakpoints only once FILE exists (own agent thread) */
 static void JNICALL wait_for_arm(jvmtiEnv *je, JNIEnv *jni, void *arg) {
@@ -1045,10 +1061,9 @@ static void text_of(JNIEnv *jni, jobject v, const char *getter, char *o, size_t 
 	}
 	(*jni)->DeleteLocalRef(jni, cs.l);
 }
-static void click_hit(JNIEnv *jni, jthread th, jmethodID m) {
-	struct mc *e0 = method(m);
-	jobject v = NULL;
-	if (!e0 || (*J)->GetLocalInstance(J, th, 0, &v) != JVMTI_ERROR_NONE || !v) return;
+/* one T line for view v (consumed); kind tap, long-tap, text or scroll; arg: for text the length, for scroll "dx,dy" (it
+   takes the place of the view's text, which text and scroll lines never carry) */
+static void view_line(JNIEnv *jni, jobject v, const char *kind, const char *arg) {
 	char st[96], cls[160] = "?", idn[200] = "", txt[300] = "", dsc[200] = "", act[160] = "", path[256] = "-";
 	jvalue none[1]; memset(none, 0, sizeof none);
 	jclass k = (*jni)->GetObjectClass(jni, v); class_name(k, cls, sizeof cls); (*jni)->DeleteLocalRef(jni, k);
@@ -1063,7 +1078,8 @@ static void click_hit(JNIEnv *jni, jthread th, jmethodID m) {
 			(*jni)->DeleteLocalRef(jni, res.l);
 		}
 	}
-	if (k_textview && (*jni)->IsInstanceOf(jni, v, k_textview) && !(k_edittext && (*jni)->IsInstanceOf(jni, v, k_edittext)))
+	if (arg) snprintf(txt, sizeof txt, "%s", arg);
+	else if (k_textview && (*jni)->IsInstanceOf(jni, v, k_textview) && !(k_edittext && (*jni)->IsInstanceOf(jni, v, k_edittext)))
 		text_of(jni, v, "getText", txt, sizeof txt);
 	text_of(jni, v, "getContentDescription", dsc, sizeof dsc);
 	/* activity: getContext() and the base contexts below it */
@@ -1107,7 +1123,7 @@ static void click_hit(JNIEnv *jni, jthread th, jmethodID m) {
 	(*jni)->DeleteLocalRef(jni, v);
 	char b[1900];
 	int32_t len = snprintf(b, sizeof b, "T\t%lld\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t", (long long)now_us(), tid(),
-	                       !strcmp(e0->name, "performLongClick") ? "long-tap" : "tap", act, cls, idn, txt, dsc);
+	                       kind, act, cls, idn, txt, dsc);
 	if (have) len += snprintf(b + len, sizeof b - (size_t)len, "%d\t%d\t%d\t%d\t%s\n", pv[0] - pc[0], pv[1] - pc[1],
 	                          pv[0] - pc[0] + w.i, pv[1] - pc[1] + h.i, path);
 	else len += snprintf(b + len, sizeof b - (size_t)len, "\t\t\t\t%s\n", path);
@@ -1115,6 +1131,40 @@ static void click_hit(JNIEnv *jni, jthread th, jmethodID m) {
 	/* text and description may hold tabs and newlines */
 	for (int32_t i = 0; i < len - 1; i++) if ((uint8_t)b[i] < 0x20 && b[i] != '\t') b[i] = ' ';
 	emit(b, (size_t)len);
+}
+/* View.performClick/performLongClick: a click, from the user or from the app; only without ATL's InputTrace hooks */
+static void click_hit(JNIEnv *jni, jthread th, jmethodID m) {
+	struct mc *e0 = method(m);
+	jobject v = NULL;
+	if (have_trace || !e0 || (*J)->GetLocalInstance(J, th, 0, &v) != JVMTI_ERROR_NONE || !v) return;
+	view_line(jni, v, !strcmp(e0->name, "performLongClick") ? "long-tap" : "tap", NULL);
+}
+/* ATL's android.atl.InputTrace (static, empty): what the user does. userTouch(View, action 0 click / 1 long click),
+   textChanged(TextView, len), key(keyCode, action) and scroll(View, dx, dy) */
+static void trace_hit(JNIEnv *jni, jthread th, jmethodID m) {
+	struct mc *e0 = method(m);
+	if (!e0) return;
+	jobject v = NULL; jint i1 = 0, i2 = 0;
+	if (!strcmp(e0->name, "key")) {
+		if ((*J)->GetLocalInt(J, th, 0, arg_slot(m, 0), &i1) != JVMTI_ERROR_NONE || (*J)->GetLocalInt(J, th, 0, arg_slot(m, 1), &i2) != JVMTI_ERROR_NONE) return;
+		char b[160];
+		int32_t len = snprintf(b, sizeof b, "T\t%lld\t%d\tkey\t\t\t\t%d,%d\t\t\t\t\t\t-\n", (long long)now_us(), tid(), i1, i2);
+		emit(b, (size_t)len);
+		return;
+	}
+	if ((*J)->GetLocalObject(J, th, 0, arg_slot(m, 0), &v) != JVMTI_ERROR_NONE || !v) return;
+	char arg[40]; const char *kind = "tap";
+	if (!strcmp(e0->name, "userTouch")) {
+		if ((*J)->GetLocalInt(J, th, 0, arg_slot(m, 1), &i1) != JVMTI_ERROR_NONE) i1 = 0;
+		kind = i1 == 1 ? "long-tap" : "tap"; arg[0] = 0;
+	} else if (!strcmp(e0->name, "textChanged")) {
+		if ((*J)->GetLocalInt(J, th, 0, arg_slot(m, 1), &i1) != JVMTI_ERROR_NONE) i1 = 0;
+		kind = "text"; snprintf(arg, sizeof arg, "%d", i1);
+	} else {
+		if ((*J)->GetLocalInt(J, th, 0, arg_slot(m, 1), &i1) != JVMTI_ERROR_NONE || (*J)->GetLocalInt(J, th, 0, arg_slot(m, 2), &i2) != JVMTI_ERROR_NONE) { (*jni)->DeleteLocalRef(jni, v); return; }
+		kind = "scroll"; snprintf(arg, sizeof arg, "%d,%d", i1, i2);
+	}
+	view_line(jni, v, kind, arg[0] ? arg : NULL);
 }
 /* ATL only: receivers registered before the breakpoints were set sit in the static map Context.receiverMap
    (filter -> receiver); B lines of kind "early". Android has no such map the agent could read: there, registrations

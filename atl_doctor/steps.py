@@ -8,7 +8,7 @@ One command per line or separated by ';', '#' starts a comment outside quotes:
         goes to the rectangle's centre and replay.jsonl says "not found")
     type "text"   scroll N   scroll-smooth DY   wait SECONDS   wait-idle [TIMEOUT]   mark ["name"]   screenshot "name"
     repeat N { ... }   (also over several lines, nested)
-A scenario may begin with `start_zustand: NAME`: the app's state saved with `atl-doctor zustand sichern` is loaded
+A scenario may begin with `start_zustand: NAME`: the app's state saved with `atl-doctor state save` is loaded
 before the app starts.
 """
 from __future__ import annotations

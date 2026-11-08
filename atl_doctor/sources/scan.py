@@ -238,17 +238,24 @@ def _run_scan(args: argparse.Namespace) -> int:
 
 
 def register(sub: argparse._SubParsersAction) -> None:
-    from ..cli import common_parser
+    from ..cli import command, done
 
-    p = sub.add_parser("scan", help="static coverage of APKs against ATL (no start)", parents=[common_parser()])
-    p.add_argument("-f", "--format", choices=["text", "json", "html"], default="text")
-    p.add_argument("-o", "--output", metavar="FILE", help="write to FILE instead of stdout")
-    p.add_argument("--atl-src", metavar="DIR", help="ATL source tree (default: $ATL_DOCTOR_ATL_SRC)")
-    p.add_argument("--prefix", metavar="DIR", help="ATL installation prefix (default: $ATL_DOCTOR_PREFIX)")
-    p.add_argument("--compare-src", metavar="DIR", help="second ATL source tree (with build*/api-impl.jar) to compare")
-    p.add_argument("--aosp", metavar="DIR", help="AOSP source tree (root or frameworks/base) to compare stubs and "
-                                                 "missing methods with (default: $ATL_DOCTOR_AOSP)")
-    p.add_argument("--no-aosp-fetch", action="store_true", help="do not download AOSP source when --aosp is not given (default: fetch once into the cache)")
-    p.add_argument("--sdk-int", type=int, metavar="N", help="SDK_INT ATL reports (default: the app's minSdk, at least 9)")
-    p.add_argument("apks", nargs="+", metavar="APK")
-    p.set_defaults(func=_run_scan)
+    p, g = command(sub, "scan", "static coverage of APKs against ATL (no start)",
+                   "Check what the APKs call against what ATL implements. Nothing is started.")
+    g.args.add_argument("apks", nargs="+", metavar="APK", help="the apps to scan")
+    g.output.add_argument("-f", "--format", choices=["text", "json", "html"], default="text",
+                          help="report format (default: text)")
+    g.output.add_argument("-o", "--output", metavar="FILE", help="write to FILE instead of stdout")
+    g.atl.add_argument("--atl-src", metavar="DIR", help="ATL source tree (default: $ATL_DOCTOR_ATL_SRC)")
+    g.atl.add_argument("--prefix", metavar="DIR", help="ATL installation prefix (default: $ATL_DOCTOR_PREFIX)")
+    g.atl.add_argument("--compare-src", metavar="DIR",
+                       help="second ATL source tree (with build*/api-impl.jar) to compare")
+    g.atl.add_argument("--aosp", metavar="DIR",
+                       help="AOSP source tree (root or frameworks/base) to compare stubs and missing methods "
+                            "with (default: $ATL_DOCTOR_AOSP)")
+    g.advanced.add_argument("--sdk-int", type=int, metavar="N",
+                            help="SDK_INT ATL reports (default: the app's minSdk, at least 9)")
+    g.advanced.add_argument("--no-aosp-fetch", action="store_true",
+                            help="do not download AOSP source when --aosp is not given (default: fetch once into "
+                                 "the cache)")
+    done(p, g, _run_scan)

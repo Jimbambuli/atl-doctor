@@ -1,0 +1,22 @@
+usage: atl-doctor diff [-f {text,json}] [--fail-on new|CLASS[,CLASS]] [-h]
+                       [-q] [-v]
+                       OLD.json NEW.json
+
+Show which findings are new, gone or changed between two JSON reports (report
+-f json).
+
+Arguments:
+  OLD.json                the earlier report
+  NEW.json                the later report
+
+Output:
+  -f, --format {text,json}
+                          output format (default: text)
+  --fail-on new|CLASS[,CLASS]
+                          exit 4 if there are new findings (new) or new
+                          findings of these classes
+
+General:
+  -h, --help              show this help and exit
+  -q, --quiet             only errors on stderr
+  -v, --verbose           more messages on stderr

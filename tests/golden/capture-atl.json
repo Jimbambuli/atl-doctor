@@ -162,6 +162,7 @@
       "memory-growth": 20,
       "missing": 60,
       "other": 0,
+      "render": 30,
       "stub-result-used": 40,
       "tree-visible": 30
     },

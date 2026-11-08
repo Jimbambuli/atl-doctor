@@ -47,6 +47,10 @@ and \fB\-h\fR (\fB\-\-help\fR).
 records an app under Android Translation Layer (ATL) and, if asked, on an Android device, and reports what
 is most worth fixing in ATL: stubs that were hit, missing methods, swallowed exceptions, differences in the
 view tree, slow frames, hangs and memory growth.
+With a screenshot per mark it also finds rendering defects on ATL (class render): text whose colour is
+hardly distinguishable from the background (WCAG contrast under 4.5:1, large text 3:1, measured in the picture),
+text, icons or selected tabs that are one flat colour, and views that stick out of their window or parent.
+Truncated text is not checked (the view tree has no text metrics). In a comparison with Android a defect that Android shows as well is dropped.
 Findings are ranked by what to fix first and carry a stable ID, so two reports can be compared with
 .BR "atl-doctor diff" .
 .PP
@@ -162,7 +166,7 @@ Write to \fIFILE\fR instead of standard output.
 .TP
 .BI \-\-fail\-on " CLASS" [, CLASS ]
 Exit with status 4 if a finding of one of these classes exists.
-Classes: crash, missing, exception\-atl\-only, stub\-result\-used, tree\-visible, memory\-growth, jank, other.
+Classes: crash, missing, exception\-atl\-only, stub\-result\-used, tree\-visible, render, memory\-growth, jank, other.
 .TP
 .BI \-\-log " FILE"
 Log mode: one log file per phase (repeatable).

@@ -7,6 +7,7 @@ from ..findings import Finding, Klass, Occurrence, merge
 from .exceptions import exception_findings, exit_findings, parse_agent
 from .log import SUGGEST_CRASH, parse_log_text
 from .memory import memory_findings
+from .render import render_findings
 from .perf import JANK_MIN_FRAMES, atl_frame_intervals, perf_findings
 from .stubs import StubEntry
 from .trace import read_counter_output, read_stub_hits, stub_findings
@@ -34,6 +35,7 @@ def load_capture_findings(cap: Capture, entries: list[StubEntry] | None,
     events = parse_agent(cap.path(AGENT)) if cap.path(AGENT).is_file() else []
     if m.side == "atl":  # Android memory is only for comparison (report DIR ANDROID-DIR)
         found += memory_findings(cap, events)
+        found += render_findings(cap)
     if cap.path(AGENT).is_file():
         exc = exception_findings(events, marks, m.side)
         agent_ids = {f.id for f in exc}

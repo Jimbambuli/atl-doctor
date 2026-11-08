@@ -51,6 +51,8 @@ class Node:
     clip_v: bool = False            # clipped by an ancestor at the top or bottom edge
     clip_h: bool = False
     scrollable: bool = False
+    enabled: bool = True
+    selected: bool = False
     full_id: str = field(default="", repr=False)
 
 
@@ -102,7 +104,8 @@ def load_tree(path: Path, side: str, density: float | None = None, normalize: bo
             full = "" if a.get("resource-id", "") == "0x0" else a.get("resource-id", "")
             n = Node(short_id(full), a.get("class", ""), _norm(a.get("text", "")), _norm(a.get("content-desc", "")),
                      _rect(a.get("bounds", "[0,0][0,0]")), True, window=window, real_cls=a.get("atl-class", ""),
-                     clickable=a.get("clickable") == "true", parent=parent, opaque=opaque, full_id=full)
+                     clickable=a.get("clickable") == "true", parent=parent, opaque=opaque, full_id=full,
+                     enabled=a.get("enabled") != "false", selected=a.get("selected") == "true")
             n.real_cls = n.real_cls or n.cls
             new_clip, new_alpha = None, 1.0
             if atl:

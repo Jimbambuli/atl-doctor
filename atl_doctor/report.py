@@ -44,6 +44,7 @@ SECTIONS: list[tuple[str, Callable[[Finding], bool]]] = [
     ("Crashes", _kind_in("crash")),
     ("Exit cause", _kind_in("exit")),
     ("View tree differences", _kind_in("tree")),
+    ("Rendering defects", _kind_in("render")),
     ("Lifecycle differences", _kind_in("lc")),
     ("Jank and hangs", _kind_in("jank", "hang", "gc")),
     ("Memory growth", _kind_in("mem")),
@@ -432,7 +433,7 @@ def apply_capture_aosp(r: Report, root: Path, aosp: str | None = None, no_fetch:
 
 
 def build_capture_report(path: Path, jank_min_frames: int = JANK_MIN_FRAMES) -> tuple[Report, Path]:
-    from .capture import AGENT, TRACE_DIR, Capture
+    from .capture import AGENT, TRACE_DIR, TREES, Capture
     from .sources import load_capture_findings
     from .sources.exceptions import agent_problems, parse_agent
     from .env import atl_jars
@@ -468,6 +469,10 @@ def build_capture_report(path: Path, jank_min_frames: int = JANK_MIN_FRAMES) -> 
             env["agent"] = "; ".join(problems)
     notes: list[str] = []
     phases, findings = load_capture_findings(cap, entries, used, jank_min_frames, notes)
+    if m.side == "atl" and any(cap.path(TREES).glob("*.xml")):
+        from .sources.render import NOT_DETERMINABLE
+
+        notes.append(NOT_DETERMINABLE)
     probes = [Probe(p["name"], p["available"], p.get("reason", ""), p.get("hint", "")) for p in m.probes]
     r = Report("record", env, probes, phases, findings)
     if notes:
@@ -504,6 +509,10 @@ def build_pair_report(atl_dir: Path, android_dir: Path, density: float | None,
         raise UsageError("report DIR ANDROID-DIR: the first must be an ATL capture, the second one from record --android")
     _, android = load_capture_findings(acap, None, set())
     findings = compare_sides(r.findings, android)
+    from .sources.render import android_ids
+
+    same = android_ids(acap)   # a rendering defect that Android shows as well is not an ATL defect
+    findings = [f for f in findings if not (f.kind == "render" and f.id in same)]
     atl_marks, and_marks = Capture(root).read_marks(), acap.read_marks()
     atl_names, and_names = [k.name for k in atl_marks], [k.name for k in and_marks]
     if root.joinpath(AGENT).is_file() and acap.path(AGENT).is_file():

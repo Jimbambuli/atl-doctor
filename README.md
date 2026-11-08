@@ -54,6 +54,12 @@ atl-doctor zustand sichern app.apk eingerichtet       # app data (ATL) or AVD sn
                                                       # a step file can begin with `start_zustand: eingerichtet`
 ```
 
+With screenshots (`--headless`/`--steps`) the report also lists *rendering defects* (class `render`, with the view's
+ID/path, rectangle and a picture cut from the screenshot): unreadable text (WCAG contrast of the measured text colour
+against the measured background under 4.5:1, large text 3:1), text/icons/selected tabs that are one flat colour, and
+views that stick out of their window or parent (tree only). Truncated text is not checked: tree and picture do not say
+how wide the text would be. Against an Android capture only defects that Android does not show are kept.
+
 A jank finding needs at least 30 frames in the phase (`--jank-min-frames N`); with fewer, the report only notes
 "too few frames".
 

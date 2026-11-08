@@ -245,6 +245,7 @@ def record_android(opts: RecordOptions) -> int:
         _shot(adb, cap, mk)
 
     stop = _Stop()
+    watcher = None
     try:
         with stop, open(cap.path(LOGCAT_RAW), "wb") as raw:
             logcat = subprocess.Popen(["adb", "-s", serial, "logcat", "-v", "threadtime"], stdout=raw,
@@ -253,6 +254,15 @@ def record_android(opts: RecordOptions) -> int:
             try:
                 adb.run(*m.command[3:])
                 started = time.monotonic()
+                if opts.input:
+                    from .android_input import Watcher
+
+                    try:
+                        watcher = Watcher(serial, cap, pkg, density or 1.0, adb.out)
+                        watcher.start(adb.boot_us())
+                    except DoctorError as e:
+                        _warn(f"input recording off: {e}")
+                        watcher = None
                 if steps is not None:
                     from .steps import AndroidDriver
                     steps_state = _start_steps(cap, AndroidDriver(serial, cap, pkg, density or 1.0), steps,
@@ -296,6 +306,8 @@ def record_android(opts: RecordOptions) -> int:
                 logcat.terminate()
                 logcat.wait(10)
     finally:
+        if watcher is not None:
+            m.environment["input_events"] = str(watcher.write())
         if lib:
             adb.shell("setprop", f"wrap.{pkg}", '""')
             if enforcing:

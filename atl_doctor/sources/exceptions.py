@@ -11,8 +11,8 @@ from ..findings import Finding, Klass, Occurrence, normalize_text
 from .log import SUGGEST_CRASH, is_platform_frame
 
 # columns per line tag, including tag and time; tags in WITH_TID have the thread id as third column
-COLUMNS = {"E": 7, "L": 9, "I": 4, "P": 5, "G": 3, "H": 5, "M": 6, "C": 6, "X": 7, "R": 7, "Q": 5, "B": 7}
-WITH_TID = {"E", "L", "I", "H", "X", "R", "B"}
+COLUMNS = {"E": 7, "L": 9, "I": 4, "P": 5, "G": 3, "H": 5, "M": 6, "C": 6, "X": 7, "R": 7, "Q": 5, "B": 7, "T": 14}
+WITH_TID = {"E", "L", "I", "H", "X", "R", "B", "T"}
 
 
 @dataclass

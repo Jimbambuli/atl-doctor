@@ -303,3 +303,69 @@ def test_uiautomator_dumps_never_overlap(adb, tmp_path):
         assert not any("uiautomator" in x for x in calls(adb)) if (adb / "calls.log").exists() else True
     t.join(10)
     assert any("uiautomator" in x for x in calls(adb))
+
+
+def _steps_table(adb):
+    table(adb, root=False)
+    t = json.loads((adb / "table.json").read_text())
+    t["shell dumpsys window"] = ["  mCurrentFocus=Window{1 u0 org.example.demo/org.example.demo.Main}\n", 0]
+    t["shell dumpsys gfxinfo org.example.demo"] = ["Total frames rendered: 12\n", 0]
+    (adb / "table.json").write_text(json.dumps(t))
+    (adb / "device" / "pidof").write_text("1234\n")
+    shutil.copy(TREES / "android-main.xml", adb / "device" / "atl-doctor.xml")
+
+
+def test_android_tap_steps_write_replay_rows(adb, apk, tmp_path):
+    _steps_table(adb)
+    steps = tmp_path / "s.steps"
+    steps.write_text('wait-window org.example.demo 5\ntap id/save "Save" path:0/1 rect:100,300,300,350\n'
+                     'long-tap "Gone" rect:10,20,30,40\ntap "Gone"\n')
+    out = tmp_path / "c"
+    assert main(["record", "--android", "--steps", str(steps), "-o", str(out), str(apk)]) == 0
+    c = calls(adb)
+    assert "shell input tap 400 650" in c                          # found by id: centre of id/save
+    assert "shell input swipe 40 60 40 60 800" in c                # not found: the rectangle's centre, held
+    assert sum(x.startswith("shell input tap") for x in c) == 1    # the last tap has neither a view nor a rectangle
+    rows = [json.loads(ln) for ln in (out / "replay.jsonl").read_text().splitlines()]
+    assert [(r["n"], r["found"], r["by"]) for r in rows] == [(2, True, "id"), (3, False, "rect"), (4, False, "none")]
+    assert (out / rows[0]["tree"]).is_file()
+
+
+def test_android_input_flag_starts_a_watcher_and_records_how_many_events(adb, apk, tmp_path, monkeypatch, capsys):
+    from atl_doctor import android_input
+    from atl_doctor import bedienung as bd
+
+    _steps_table(adb)
+    seen = {}
+
+    class FakeWatcher:
+        def __init__(self, serial, cap, package, density, adb_run, full=False):
+            seen.update(serial=serial, package=package, density=density)
+            self.cap = cap
+
+        def start(self, boot_us_device=None):
+            seen["boot"] = boot_us_device
+
+        def write(self):
+            bd.write_input(self.cap.path(bd.INPUT_FILE), bd.make_header("android", "org.example.demo", "getevent"),
+                           [bd.make_event("back", 5)])
+            return 1
+
+    monkeypatch.setattr(android_input, "Watcher", FakeWatcher)
+    steps = tmp_path / "s.steps"
+    steps.write_text("wait-window org.example.demo 5\n")
+    out = tmp_path / "c"
+    assert main(["record", "--android", "--input", "--steps", str(steps), "-o", str(out), str(apk)]) == 0
+    assert seen == {"serial": "emulator-5554", "package": "org.example.demo", "density": 2.0, "boot": 1000500000}
+    assert Capture.open(out).read_manifest().environment["input_events"] == "1"
+    assert bd.read_input(out)[1][0]["kind"] == "back"
+
+
+def test_android_input_flag_without_a_touch_screen_warns_and_goes_on(adb, apk, tmp_path, capsys):
+    _steps_table(adb)   # the fake adb's getevent -pl answers nothing
+    steps = tmp_path / "s.steps"
+    steps.write_text("wait-window org.example.demo 5\n")
+    out = tmp_path / "c"
+    assert main(["record", "--android", "--input", "--steps", str(steps), "-o", str(out), str(apk)]) == 0
+    assert "input recording off: no touch screen found" in capsys.readouterr().err
+    assert not (out / "input.jsonl").exists()

@@ -3,6 +3,9 @@
 
 One command per line or separated by ';', '#' starts a comment outside quotes:
     wait-window "Title" [TIMEOUT]   close-window   click "Text" | click id/NAME | click X,Y (dp)   key NAME[+NAME]
+    tap | long-tap  [id/NAME] ["Text"] [path:0/2/1] [rect:L,T,R,B]   (from `atl-doctor scenario-from`: the view is looked
+        up by id, then text, then path, then rectangle (dp); a tap whose view is not found does not stop the run, it
+        goes to the rectangle's centre and replay.jsonl says "not found")
     type "text"   scroll N   scroll-smooth DY   wait SECONDS   wait-idle [TIMEOUT]   mark ["name"]   screenshot "name"
     repeat N { ... }   (also over several lines, nested)
 A scenario may begin with `start_zustand: NAME`: the app's state saved with `atl-doctor zustand sichern` is loaded
@@ -137,6 +140,23 @@ def _command(name: _Tok, args: list[_Tok], filename: str) -> Step:
         if len(args) > 1:
             raise err("click: only X,Y takes a second argument (android=X,Y)")
         raise err('click expects "Text", id/NAME or X,Y')
+    if cmd in ("tap", "long-tap"):
+        id_, text, path, rect = "", "", "", ""
+        for a in args:
+            if a.kind == "str":
+                text = a.value
+            elif a.value.startswith("id/") and len(a.value) > 3:
+                id_ = a.value
+            elif a.value.startswith("path:") and re.fullmatch(r"\d+(/\d+)*", a.value[5:]):
+                path = a.value[5:]
+            elif a.value.startswith("rect:") and len(a.value[5:].split(",")) == 4 and all(
+                    _NUM.match(x) for x in a.value[5:].split(",")):
+                rect = a.value[5:]
+            else:
+                raise err(f"{cmd}: expected id/NAME, a text, path:0/1/2 or rect:L,T,R,B, got {a.value!r}")
+        if not (id_ or text or path or rect):
+            raise err(f"{cmd} needs a target (id/NAME, a text, path: or rect:)")
+        return Step(line, cmd, (id_, text, path, rect))
     if cmd == "wait-window":
         limit(2)
         match = text_arg(0)
@@ -246,6 +266,10 @@ class Driver(Protocol):
     has_tree: bool
 
     def click(self, x_dp: float, y_dp: float) -> None: ...
+    def long_press(self, x_dp: float, y_dp: float) -> None: ...
+    def tree_nodes(self) -> list: ...                       # a fresh view tree (dp, relative to android:id/content)
+    def node_pos(self, node) -> tuple[float, float] | None: ...
+    def snapshot(self, name: str) -> "Path | None": ...     # a fresh tree file in trees/ (None: no tree available)
     def locate(self, selector: str) -> tuple[float, float] | None: ...
     def key(self, combo: str) -> None: ...
     def type_text(self, s: str) -> None: ...
@@ -262,6 +286,7 @@ def _describe(s: Step) -> str:
     return " ".join([s.cmd] + [repr(a) if isinstance(a, str) and " " in a else str(a) for a in s.args])
 
 
+REPLAY_CMDS = ("tap", "long-tap", "click", "key", "type", "scroll", "scroll-smooth")   # steps with a row in replay.jsonl
 PROBED_CMDS = ("scroll", "scroll-smooth", "key")   # steps that can move content: view trees before and after
 SETTLE_S = 2.0                    # a probed step is over when the drawing has settled (kinetic scrolling)
 
@@ -322,11 +347,12 @@ class _Probe:
 
 
 def run_steps(steps: list[Step | Repeat], driver: Driver, filename: str, log: TextIO,
-              data: TextIO | None = None, _state: dict | None = None) -> None:
+              data: TextIO | None = None, _state: dict | None = None, replay: TextIO | None = None) -> None:
     """Run the steps in order; one line per step in log; failures raise StepError with the line number.
 
     data (steps.tsv, see sources/stepstats.py) gets one row per finished step with its times and, if the driver offers
-    frame_count()/scroll_tree(), the frames drawn and the distance scrolled."""
+    frame_count()/scroll_tree(), the frames drawn and the distance scrolled. replay (replay.jsonl, see bedienung.py) gets
+    one JSON row per input step: whether a tap's target was found and how, and the view tree taken after the step."""
     from .capture import now_us
 
     if _state is None:
@@ -335,7 +361,7 @@ def run_steps(steps: list[Step | Repeat], driver: Driver, filename: str, log: Te
     for s in steps:
         if isinstance(s, Repeat):
             for _ in range(s.count):
-                run_steps(list(s.body), driver, filename, log, data, _state)
+                run_steps(list(s.body), driver, filename, log, data, _state, replay)
             continue
         log.write(f"{time.strftime('%H:%M:%S')} {filename}:{s.line}: {_describe(s)}\n")
         log.flush()
@@ -343,11 +369,13 @@ def run_steps(steps: list[Step | Repeat], driver: Driver, filename: str, log: Te
         t0 = now_us()[0]
         tree = probe.before(s) if data is not None else None
         try:
-            _run_one(s, driver, filename)
+            info = _run_one(s, driver, filename)
         except StepError:
             raise
         except DoctorError as e:  # a driver failure (input helper, adb ...) belongs to this line
             raise StepError(filename, s.line, str(e)) from e
+        if replay is not None and s.cmd in REPLAY_CMDS:
+            _replay_row(replay, _state["n"], s, driver, info)
         if data is not None:
             frames, scroll = probe.after(s, tree)
             t1 = now_us()[0]
@@ -360,15 +388,59 @@ def run_steps(steps: list[Step | Repeat], driver: Driver, filename: str, log: Te
             data.flush()
 
 
+def _replay_row(out: TextIO, n: int, s: Step, d: Driver, info: dict | None) -> None:
+    """One replay.jsonl row; the tree is taken once the drawing has settled."""
+    import json
+
+    row: dict = {"n": n, "line": s.line, "cmd": s.cmd, "step": re.sub(r"[\t\r\n]", " ", _describe(s)),
+                 **(info or {"found": None, "by": ""})}
+    snap = getattr(d, "snapshot", None)
+    if snap is not None:
+        try:
+            d.wait_idle(SETTLE_S)
+            p = snap(f"replay-{n:03d}")
+        except DoctorError:
+            p = None
+        row["tree"] = f"trees/{p.name}" if p else None
+    out.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+    out.flush()
+
+
+def _tap(s: Step, d: Driver) -> dict:
+    """tap/long-tap: look the target up (id, text, path), else go to the recorded rectangle; never raises for a
+    missing target, the replay report shows it."""
+    from .bedienung import resolve_target
+
+    id_, text, path, rect_s = s.args
+    rect = [float(x) for x in str(rect_s).split(",")] if rect_s else None
+    if not d.has_tree:
+        raise StepError("-", s.line, f"{s.cmd} needs a view tree (ATLViewDump/uiautomator)")
+    nodes = d.tree_nodes()
+    node, how = resolve_target(nodes, str(id_), str(text), str(path), rect)
+    pos = d.node_pos(node) if node is not None else None
+    if pos is None and node is not None:
+        node, how = None, "rect" if rect else "none"
+    if pos is None and rect:
+        pos = ((rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2)
+    if pos is not None:
+        (d.long_press if s.cmd == "long-tap" else d.click)(*pos)
+    return {"found": node is not None, "by": how, "acted": pos is not None}
+
+
 def _fmt_s(t: float) -> str:
     return f"{t:g}"
 
 
-def _run_one(s: Step, d: Driver, filename: str) -> None:
+def _run_one(s: Step, d: Driver, filename: str) -> dict | None:
     def fail(msg: str) -> StepError:
         return StepError(filename, s.line, msg)
 
     a = s.args
+    if s.cmd in ("tap", "long-tap"):
+        try:
+            return _tap(s, d)
+        except StepError as e:
+            raise fail(str(e).split(": ", 1)[-1]) from e
     if s.cmd == "click":
         if a[0] == "xy":
             k = 3 if len(a) > 3 and isinstance(d, AndroidDriver) else 1
@@ -408,6 +480,7 @@ def _run_one(s: Step, d: Driver, filename: str) -> None:
 IDLE_QUIET_S = 0.6        # no new frame for this long = idle
 IDLE_FALLBACK_S = 2.0     # without frame times: fixed pause
 INPUT_SYNC_S = 15.0
+LONG_PRESS_MS = 800
 WINDOW_POLL_S = 0.02      # wait-window: how often the watch script's events are read
 WINDOW_QUERY_S = 2.0      # wait-window: how often the windows are asked for as well
 
@@ -516,12 +589,30 @@ class AtlDriver:
             self.content = (content.gtk_rect[0], content.gtk_rect[1])
         return nodes
 
+    def long_press(self, x_dp: float, y_dp: float) -> None:
+        if not self._tree_taken and self.has_tree:
+            self._tree()
+        ox, oy = self._origin()
+        self._send(f"long {round(ox + x_dp)} {round(oy + y_dp)} {LONG_PRESS_MS}")
+
+    def tree_nodes(self) -> list:
+        return self._tree()
+
+    def snapshot(self, name: str) -> Path | None:
+        from .capture import TREES
+        from .sources.tree import request_atl_tree
+
+        return request_atl_tree(self.cap.path(TREES), name) if self.has_tree else None
+
     def locate(self, selector: str) -> tuple[float, float] | None:
         from .sources.tree import find_node
 
-        nodes = self._tree()
-        n = find_node(nodes, selector)
-        if n is None or n.gtk_rect is None:
+        n = find_node(self._tree(), selector)
+        return self.node_pos(n) if n is not None else None
+
+    def node_pos(self, n) -> tuple[float, float] | None:
+        """Centre of a node of the latest tree in dp (a dialog's own window is offset to the main window)."""
+        if n.gtk_rect is None:
             return None
         cx, cy = (n.gtk_rect[0] + n.gtk_rect[2]) / 2, (n.gtk_rect[1] + n.gtk_rect[3]) / 2
         if not n.window.startswith("activity"):  # dialog or popup: its own window, the topmost one
@@ -702,9 +793,30 @@ class AndroidDriver:
         from .sources.tree import find_node, load_tree
 
         n = find_node(load_tree(self._tree(), "android", self.density), selector)
-        if n is None:
-            return None
+        return self.node_pos(n) if n is not None else None
+
+    def node_pos(self, n) -> tuple[float, float] | None:
         return (n.rect[0] + n.rect[2]) / 2, (n.rect[1] + n.rect[3]) / 2
+
+    def tree_nodes(self) -> list:
+        from .sources.tree import load_tree
+
+        return load_tree(self._tree(), "android", self.density)
+
+    def long_press(self, x_dp: float, y_dp: float) -> None:
+        if not self._tree_taken:
+            self._tree()
+        x, y = map(str, self._px(x_dp, y_dp))
+        self._adb("shell", "input", "swipe", x, y, x, y, str(LONG_PRESS_MS))
+
+    def snapshot(self, name: str) -> Path | None:
+        from .capture import TREES
+
+        out = self.cap.path(TREES) / f"{name}.xml"
+        with UIAUTOMATOR_LOCK:
+            self._adb("shell", "uiautomator", "dump", "/sdcard/atl-doctor.xml")
+            self._adb("pull", "/sdcard/atl-doctor.xml", str(out))
+        return out
 
     def _tree(self) -> Path:
         """A fresh uiautomator dump; it sets the content origin."""

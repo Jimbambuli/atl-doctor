@@ -1,0 +1,28 @@
+# made by `atl-doctor scenario-from` from android-run/input.jsonl (side android, source getevent, 9 events)
+# a tap finds its view by resource id, then text, then path, then rectangle
+wait-window org.example.demo 60
+wait 5
+# 1: tap in org.example.demo.MainActivity
+tap id/save "Say \"hi\"" path:0/1 rect:700,0,800,60
+# 2: long-tap in org.example.demo.MainActivity
+long-tap "Up" rect:0,0,60,60
+wait 1.9
+# 3: text in org.example.demo.MainActivity (6 characters, placeholder: the recording holds no text)
+type "xxxxxx"
+wait 1.0
+# 4: text in org.example.demo.MainActivity
+type "open"
+wait 5.0
+# 5: key
+key Return
+wait 10.0
+# 6: back in org.example.demo.MainActivity
+key Escape
+wait 1.0
+# 7: scroll
+scroll-smooth 312
+wait 1.0
+# 8: tap
+tap rect:5,6,5,6
+wait 1.0
+# 9: tap (no target, skipped)

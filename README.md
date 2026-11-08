@@ -56,6 +56,9 @@ atl-doctor vergleich -o v1 --prefix ~/.local/opt/atl --szenario s.steps app.apk
                                                       # (<= 60 lines, likely causes first) and v1/bericht.json
 atl-doctor zustand sichern app.apk eingerichtet       # app data (ATL) or AVD snapshot (--android) by name;
                                                       # a step file can begin with `start_zustand: eingerichtet`
+atl-doctor record --android --input -o android-run app.apk  # what is done on the device -> android-run/input.jsonl (ATL: input.jsonl comes from the agent)
+atl-doctor scenario-from android-run -o s.steps       # a step file with `tap id/NAME "Text" path:.. rect:..`, replayable under ATL and on Android
+atl-doctor report atl-run android-run                 # with replay.jsonl on both sides: "Replayed input", target found yes/no, tree after each step
 ```
 
 With screenshots (`--headless`/`--steps`) the report also lists *rendering defects* (class `render`, with the view's

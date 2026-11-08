@@ -22,6 +22,7 @@ from .capture import (AGENT, ATL_LOG, CONTROL, MARKS, SHOTS, STEPS_DATA, STEPS_L
                       Mark)
 from .env import (AGENT_LIB, INPUT_HELPER, TRACECOUNT, WHEEL_SHIM, Probe, find_helper, has_viewdump, jvmti_plugin, lib_dir,
                   probe_all, resolve)
+from .bedienung import REPLAY_FILE
 from .errors import DoctorError, PrerequisiteMissing, UsageError
 from .headless import APP_HEIGHT, APP_WIDTH, HeadlessSession
 from .sources.trace import write_watch_file
@@ -66,6 +67,7 @@ class RecordOptions:
     # --attach-agent, the runtime stays non-debuggable), ATL counts its stub calls itself (ATL_STUB_HITS) and the
     # time line comes from ART's sampling profiler instead of a full method trace. Needs an ATL with both.
     light: bool = False
+    input: bool = False   # Android: record the touches and keys of the device into input.jsonl (getevent)
 
 
 def default_out_dir(now: datetime) -> Path:
@@ -250,8 +252,9 @@ def _start_steps(cap: Capture, driver, steps: list, filename: str) -> dict:
     def run() -> None:
         try:
             with open(cap.path(STEPS_LOG), "w", encoding="utf-8") as log, \
-                    open(cap.path(STEPS_DATA), "w", encoding="utf-8") as data:
-                run_steps(steps, driver, filename, log, data)
+                    open(cap.path(STEPS_DATA), "w", encoding="utf-8") as data, \
+                    open(cap.path(REPLAY_FILE), "w", encoding="utf-8") as replay:
+                run_steps(steps, driver, filename, log, data, replay=replay)
         except DoctorError as e:
             result["error"] = e
         except Exception as e:  # noqa: BLE001 - the recording must still end cleanly
@@ -535,6 +538,14 @@ def _finish(cap: Capture, m, rc: int, stop: _Stop, steps_state: dict, count_proc
         m.exit_status = rc
     if steps_state.get("window_close"):
         m.environment["window_close"] = json.dumps(steps_state["window_close"])
+    try:
+        from .bedienung import write_atl_input
+
+        n_input = write_atl_input(cap, m.package)
+        if n_input:
+            m.environment["input_events"] = str(n_input)
+    except (OSError, DoctorError) as e:
+        _warn(f"input recording not written: {e}")
     cap.write_manifest(m)
     _warn(f"done: {out}")
     if steps_state.get("error"):
@@ -580,7 +591,8 @@ def _run_record(args: argparse.Namespace) -> int:
 
         return record_android(RecordOptions(apk=Path(args.apk), out=Path(args.output) if args.output else None,
                                             prefix=Path(prefix) if prefix else None, atl_src=None, agent=None,
-                                            steps=Path(args.steps) if args.steps else None, android=True))
+                                            steps=Path(args.steps) if args.steps else None, android=True,
+                                            input=args.input))
     if args.launcher and args.prefix:
         raise UsageError("--launcher and --prefix exclude each other")
     if args.launcher:
@@ -627,6 +639,9 @@ def register(sub: argparse._SubParsersAction) -> None:
                    help="count instances and bytes per class at every mark (agent; slow, forces a GC per mark)")
     p.add_argument("--android", action="store_true",
                    help="record the same app on an Android device over adb (own capture directory)")
+    p.add_argument("--input", action="store_true",
+                   help="with --android: also record what is done on the device (touches, keys) into input.jsonl; "
+                        "under ATL input.jsonl comes from the agent whenever views were clicked")
     p.add_argument("apk", metavar="APK")
     p.add_argument("atl_args", nargs="*", metavar="ATL-ARGS", help="after --: passed to android-translation-layer")
     p.set_defaults(func=_run_record)

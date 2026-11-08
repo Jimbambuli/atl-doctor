@@ -1,0 +1,4 @@
+Replayed input (ATL / Android)
+    #  step                          target found ATL / Android   tree after the step
+    1  tap id/save Save 0/1 1,2,3,4  yes (id) / no (rect)         differs (6 differences, first: id/name_field: height differs by -28 dp (ATL 100,200 200x20 dp, Android 100,200 200x48 dp))
+    2  key Escape                    - / -                        n/a

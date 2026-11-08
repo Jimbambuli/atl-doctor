@@ -13,6 +13,7 @@
  *        nolc          no lifecycle
  *        nosys         no system answers (Q lines at every mark) and no broadcast hooks (B lines)
  *        noexit        no exit hooks (breakpoints in System.exit, Runtime.exit, Runtime.halt)
+ *        noinput       no input hooks (breakpoints in View.performClick and View.performLongClick, T lines)
  *        arm=FILE      set the lifecycle breakpoints only once FILE exists (breakpoints right at start make some
  *                      apps lose start-up races; exceptions are recorded from the start anyway)
  *        late=PLUGIN   load the JVMTI plugin itself latesec seconds after start (like Android's attach-agent): the
@@ -64,6 +65,12 @@
  *        or early (ATL only: receiver registered before the breakpoints were set, read from Context.receiverMap;
  *        deliveries before that are not seen either).
  *        Needs the lifecycle breakpoints (not with nolc); "?" when ART refuses to read the argument
+ *   T  t tid kind activity class id text desc left top right bottom path   a click on a view: kind = tap (View.performClick)
+ *        or long-tap (View.performLongClick). id = full resource name ("pkg:id/name", empty without), text/desc =
+ *        TextView text and content description (never the text of an EditText), left..bottom = rectangle in window
+ *        pixels relative to the content view (android:id/content), path = child indices from the content view down
+ *        ("0/2/1"; "-" when the view has no content view above it, then the rectangle is relative to the window).
+ *        Needs the lifecycle breakpoints (not with nolc). performClick also runs for clicks the app makes itself
  */
 #define _GNU_SOURCE
 #include <jvmti.h>
@@ -81,7 +88,7 @@
 
 static jvmtiEnv *J;
 static int32_t out_fd = -1;
-static uint8_t opt_ex = 1, opt_lc = 1, opt_exit = 1, opt_sys = 1;
+static uint8_t opt_ex = 1, opt_lc = 1, opt_exit = 1, opt_sys = 1, opt_input = 1;
 static volatile uint8_t lc_active;
 static char opt_arm[512], opt_late[512], opt_marks[512];
 static uint32_t opt_latesec = 20;
@@ -300,7 +307,7 @@ static void set_exit_hooks(JNIEnv *jni) {
 }
 
 /* ---------- lifecycle via breakpoints ---------- */
-enum { G_ACT = 1, G_WIN = 2, G_FRAG = 4, G_VIEW = 8, G_REG = 16, G_RCV = 32 };
+enum { G_ACT = 1, G_WIN = 2, G_FRAG = 4, G_VIEW = 8, G_REG = 16, G_RCV = 32, G_CLICK = 64 };
 static const char *n_act[] = { "onCreate", "onStart", "onRestart", "onResume", "onPostCreate", "onPostResume", "onPause",
 	"onStop", "onDestroy", "onConfigurationChanged", "onSaveInstanceState", "onRestoreInstanceState", "onNewIntent",
 	"onUserLeaveHint", "onTopResumedActivityChanged", "onMultiWindowModeChanged", "onBackPressed", NULL };
@@ -323,8 +330,9 @@ static int32_t bp_find(jmethodID m) {
 	for (uint32_t k = 0; k < BP_N; k++) { uint32_t i = (uint32_t)(h + k) & (BP_N - 1); if (bp_m[i] == m || bp_m[i] == NULL) return (int32_t)i; }
 	return -1;
 }
-static jclass k_activity, k_wincb, k_fragment, k_view, k_context, k_receiver;   /* global refs once loaded */
+static jclass k_activity, k_wincb, k_fragment, k_view, k_context, k_receiver, k_textview, k_edittext;   /* global refs once loaded */
 static void bcast_hit(JNIEnv *jni, jthread th, jmethodID m, uint8_t g);
+static void click_hit(JNIEnv *jni, jthread th, jmethodID m);
 static void scan_early_receivers(JNIEnv *jni);
 
 static void JNICALL cb_breakpoint(jvmtiEnv *je, JNIEnv *jni, jthread th, jmethodID m, jlocation loc) {
@@ -337,6 +345,7 @@ static void JNICALL cb_breakpoint(jvmtiEnv *je, JNIEnv *jni, jthread th, jmethod
 	int32_t i = bp_find(m); uint8_t g = (i >= 0 && bp_m[i] == m) ? bp_g[i] : 0;
 	pthread_mutex_unlock(&bp_lock);
 	if (g & (G_REG | G_RCV)) { bcast_hit(jni, th, m, g); in_callback = 0; return; }
+	if (g & G_CLICK) { click_hit(jni, th, m); in_callback = 0; return; }
 	jvmtiFrameInfo fr[2]; jint cnt = 0;
 	(*J)->GetStackTrace(J, th, 0, 2, fr, &cnt);
 	struct mc *e0 = method(m), *e1 = cnt > 1 ? method(fr[1].method) : NULL;
@@ -392,6 +401,8 @@ static void check_class(JNIEnv *jni, jclass k) {
 	if (!k_wincb && !strcmp(s, "Landroid/view/Window$Callback;")) k_wincb = (*jni)->NewGlobalRef(jni, k);
 	if (!k_fragment && !strcmp(s, "Landroidx/fragment/app/Fragment;")) k_fragment = (*jni)->NewGlobalRef(jni, k);
 	if (!k_view && !strcmp(s, "Landroid/view/View;")) k_view = (*jni)->NewGlobalRef(jni, k);
+	if (opt_input && !k_textview && !strcmp(s, "Landroid/widget/TextView;")) k_textview = (*jni)->NewGlobalRef(jni, k);
+	if (opt_input && !k_edittext && !strcmp(s, "Landroid/widget/EditText;")) k_edittext = (*jni)->NewGlobalRef(jni, k);
 	if (opt_sys && !k_context && !strcmp(s, "Landroid/content/Context;")) k_context = (*jni)->NewGlobalRef(jni, k);
 	if (opt_sys && !k_receiver && !strcmp(s, "Landroid/content/BroadcastReceiver;")) k_receiver = (*jni)->NewGlobalRef(jni, k);
 	(*J)->Deallocate(J, (unsigned char *)s);
@@ -407,6 +418,7 @@ static void check_class(JNIEnv *jni, jclass k) {
 	/* View only in the base class: a breakpoint in every subclass costs a deoptimization each and makes ATL so
 	   slow that apps lose start-up races */
 	if (k_view && (*jni)->IsSameObject(jni, k, k_view)) g |= G_VIEW;
+	if (opt_input && k_view && (*jni)->IsSameObject(jni, k, k_view)) g |= G_CLICK;
 	if (opt_sys && is_subclass(jni, k, k_context)) g |= G_REG;
 	if (opt_sys && is_subclass(jni, k, k_receiver)) g |= G_RCV;
 	if (!g) return;
@@ -432,6 +444,10 @@ static void check_class(JNIEnv *jni, jclass k) {
 				if ((g & G_RCV) && !strcmp(e->name, "onReceive") && !strcmp(sg, "(Landroid/content/Context;Landroid/content/Intent;)V")) mg |= G_RCV;
 				(*J)->Deallocate(J, (unsigned char *)sg);
 			}
+		}
+		if ((g & G_CLICK) && (!strcmp(e->name, "performClick") || !strcmp(e->name, "performLongClick"))) {
+			char *sg = NULL; (*J)->GetMethodName(J, ms[i], NULL, &sg, NULL);
+			if (sg) { if (!strcmp(sg, "()Z")) mg |= G_CLICK; (*J)->Deallocate(J, (unsigned char *)sg); }
 		}
 		if ((g & G_ACT) && in_list(n_act, e->name)) mg |= G_ACT;
 		if ((g & G_WIN) && in_list(n_win, e->name)) mg |= G_WIN;
@@ -466,7 +482,7 @@ static void arm(JNIEnv *jni) {
 			if (pass == 0) {
 				char *s = NULL; (*J)->GetClassSignature(J, ks[i], &s, NULL);
 				if (s && (!strcmp(s, "Landroid/app/Activity;") || !strcmp(s, "Landroid/view/Window$Callback;")
-				          || !strcmp(s, "Landroid/view/View;") || !strcmp(s, "Landroidx/fragment/app/Fragment;")
+				          || !strcmp(s, "Landroid/view/View;") || !strcmp(s, "Landroid/widget/TextView;") || !strcmp(s, "Landroid/widget/EditText;") || !strcmp(s, "Landroidx/fragment/app/Fragment;")
 				          || !strcmp(s, "Landroid/content/Context;") || !strcmp(s, "Landroid/content/BroadcastReceiver;")))
 					check_class(jni, ks[i]);
 				if (s) (*J)->Deallocate(J, (unsigned char *)s);
@@ -1003,6 +1019,103 @@ static void bcast_hit(JNIEnv *jni, jthread th, jmethodID m, uint8_t g) {
 	if (arg) (*jni)->DeleteLocalRef(jni, arg);
 	if (rcv && rcv != self) (*jni)->DeleteLocalRef(jni, rcv);
 }
+
+/* ---------- input: clicks on views ---------- */
+#define CONTENT_ID 0x01020002   /* android.R.id.content */
+static uint8_t view_pos(JNIEnv *jni, jobject v, jint xy[2]) {   /* getLocationInWindow */
+	jmethodID mid = jmid(jni, v, "getLocationInWindow", "([I)V");
+	if (!mid) return 0;
+	jintArray arr = (*jni)->NewIntArray(jni, 2);
+	if (!arr) return 0;
+	(*jni)->CallVoidMethod(jni, v, mid, arr);
+	char en[80];
+	if (jexc(jni, en, sizeof en)) { (*jni)->DeleteLocalRef(jni, arr); return 0; }
+	(*jni)->GetIntArrayRegion(jni, arr, 0, 2, xy);
+	(*jni)->DeleteLocalRef(jni, arr);
+	return 1;
+}
+static void text_of(JNIEnv *jni, jobject v, const char *getter, char *o, size_t on) {   /* CharSequence getter -> String */
+	char st[96]; jvalue none[1]; memset(none, 0, sizeof none);
+	jvalue cs = jcall(jni, v, 'L', getter, "()Ljava/lang/CharSequence;", none, st, sizeof st);
+	if (!cs.l) return;
+	if (!st[0]) {
+		jvalue s = jcall(jni, cs.l, 'L', "toString", "()Ljava/lang/String;", none, st, sizeof st);
+		jstring_of(jni, s.l, o, on);
+		if (s.l) (*jni)->DeleteLocalRef(jni, s.l);
+	}
+	(*jni)->DeleteLocalRef(jni, cs.l);
+}
+static void click_hit(JNIEnv *jni, jthread th, jmethodID m) {
+	struct mc *e0 = method(m);
+	jobject v = NULL;
+	if (!e0 || (*J)->GetLocalInstance(J, th, 0, &v) != JVMTI_ERROR_NONE || !v) return;
+	char st[96], cls[160] = "?", idn[200] = "", txt[300] = "", dsc[200] = "", act[160] = "", path[256] = "-";
+	jvalue none[1]; memset(none, 0, sizeof none);
+	jclass k = (*jni)->GetObjectClass(jni, v); class_name(k, cls, sizeof cls); (*jni)->DeleteLocalRef(jni, k);
+	jvalue id = jcall(jni, v, 'I', "getId", "()I", none, st, sizeof st);
+	if (!st[0] && id.i > 0) {
+		jvalue res = jcall(jni, v, 'L', "getResources", "()Landroid/content/res/Resources;", none, st, sizeof st);
+		if (res.l) {
+			jvalue a; a.i = id.i;
+			jvalue nm = jcall(jni, res.l, 'L', "getResourceName", "(I)Ljava/lang/String;", &a, st, sizeof st);   /* NotFoundException: no name */
+			jstring_of(jni, nm.l, idn, sizeof idn);
+			if (nm.l) (*jni)->DeleteLocalRef(jni, nm.l);
+			(*jni)->DeleteLocalRef(jni, res.l);
+		}
+	}
+	if (k_textview && (*jni)->IsInstanceOf(jni, v, k_textview) && !(k_edittext && (*jni)->IsInstanceOf(jni, v, k_edittext)))
+		text_of(jni, v, "getText", txt, sizeof txt);
+	text_of(jni, v, "getContentDescription", dsc, sizeof dsc);
+	/* activity: getContext() and the base contexts below it */
+	jvalue c = jcall(jni, v, 'L', "getContext", "()Landroid/content/Context;", none, st, sizeof st);
+	for (uint32_t i = 0; c.l && i < 8; i++) {
+		if (k_activity && (*jni)->IsInstanceOf(jni, c.l, k_activity)) {
+			jclass ck = (*jni)->GetObjectClass(jni, c.l); class_name(ck, act, sizeof act); (*jni)->DeleteLocalRef(jni, ck);
+			break;
+		}
+		jvalue b = jcall(jni, c.l, 'L', "getBaseContext", "()Landroid/content/Context;", none, st, sizeof st);
+		(*jni)->DeleteLocalRef(jni, c.l);
+		c.l = st[0] ? NULL : b.l;
+	}
+	if (c.l) (*jni)->DeleteLocalRef(jni, c.l);
+	/* child indices up to the content view */
+	jint idx[40]; uint32_t n = 0; uint8_t found = 0;
+	jobject cur = (*jni)->NewLocalRef(jni, v), content = NULL;
+	for (uint32_t i = 0; cur && i < 40; i++) {
+		jvalue cid = jcall(jni, cur, 'I', "getId", "()I", none, st, sizeof st);
+		if (!st[0] && cid.i == CONTENT_ID) { content = cur; cur = NULL; found = 1; break; }
+		jvalue p = jcall(jni, cur, 'L', "getParent", "()Landroid/view/ViewParent;", none, st, sizeof st);
+		if (st[0] || !p.l) break;
+		jvalue a; a.l = cur;
+		jvalue ix = jcall(jni, p.l, 'I', "indexOfChild", "(Landroid/view/View;)I", &a, st, sizeof st);
+		if (st[0]) { (*jni)->DeleteLocalRef(jni, p.l); break; }
+		idx[n++] = ix.i;
+		(*jni)->DeleteLocalRef(jni, cur);
+		cur = p.l;
+	}
+	if (cur) (*jni)->DeleteLocalRef(jni, cur);
+	if (found && n) {
+		size_t o = 0; path[0] = 0;
+		for (uint32_t i = n; i-- > 0 && o + 12 < sizeof path;) o += (size_t)snprintf(path + o, sizeof path - o, "%s%d", o ? "/" : "", idx[i]);
+	}
+	jint pv[2] = {0, 0}, pc[2] = {0, 0};
+	jvalue w = jcall(jni, v, 'I', "getWidth", "()I", none, st, sizeof st);
+	jvalue h = jcall(jni, v, 'I', "getHeight", "()I", none, st, sizeof st);
+	uint8_t have = view_pos(jni, v, pv);
+	if (have && content && !view_pos(jni, content, pc)) have = 0;
+	if (content) (*jni)->DeleteLocalRef(jni, content);
+	(*jni)->DeleteLocalRef(jni, v);
+	char b[1900];
+	int32_t len = snprintf(b, sizeof b, "T\t%lld\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t", (long long)now_us(), tid(),
+	                       !strcmp(e0->name, "performLongClick") ? "long-tap" : "tap", act, cls, idn, txt, dsc);
+	if (have) len += snprintf(b + len, sizeof b - (size_t)len, "%d\t%d\t%d\t%d\t%s\n", pv[0] - pc[0], pv[1] - pc[1],
+	                          pv[0] - pc[0] + w.i, pv[1] - pc[1] + h.i, path);
+	else len += snprintf(b + len, sizeof b - (size_t)len, "\t\t\t\t%s\n", path);
+	if (len > (int32_t)sizeof b - 1) { len = sizeof b - 1; b[len - 1] = '\n'; }
+	/* text and description may hold tabs and newlines */
+	for (int32_t i = 0; i < len - 1; i++) if ((uint8_t)b[i] < 0x20 && b[i] != '\t') b[i] = ' ';
+	emit(b, (size_t)len);
+}
 /* ATL only: receivers registered before the breakpoints were set sit in the static map Context.receiverMap
    (filter -> receiver); B lines of kind "early". Android has no such map the agent could read: there, registrations
    before the agent was armed are not seen. */
@@ -1096,6 +1209,7 @@ static jint start(JavaVM *vm, char *options) {
 		else if (!strcmp(o, "nolc")) opt_lc = 0;
 		else if (!strcmp(o, "noexit")) opt_exit = 0;
 		else if (!strcmp(o, "nosys")) opt_sys = 0;
+		else if (!strcmp(o, "noinput")) opt_input = 0;
 		else if (!strncmp(o, "arm=", 4)) snprintf(opt_arm, sizeof opt_arm, "%s", o + 4);
 		else if (!strncmp(o, "late=", 5)) snprintf(opt_late, sizeof opt_late, "%s", o + 5);
 		else if (!strncmp(o, "latesec=", 8)) opt_latesec = (uint32_t)strtoul(o + 8, NULL, 10);

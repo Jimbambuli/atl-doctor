@@ -234,6 +234,10 @@ def render_text(r: Report) -> str:
             section(title, [ln for f in ranked if pred(f) for ln in finding_lines(f)])
     if r.extras.get("steps"):
         section("Steps", _step_lines(r.extras["steps"]))
+    if r.extras.get("replay"):
+        from .bedienung import replay_lines
+
+        section("Replayed input (ATL / Android)", replay_lines(r.extras["replay"]))
     if r.extras.get("timeline"):
         from .sources.timeline import timeline_lines
 
@@ -358,6 +362,10 @@ def render_html(r: Report, capture_dir: Path | None = None) -> str:
             section(title, "".join(_html_finding(f, capture_dir) for f in ranked if pred(f)))
     if r.extras.get("steps"):
         section("Steps", _step_table_html(r.extras["steps"]))
+    if r.extras.get("replay"):
+        from .bedienung import replay_html
+
+        section("Replayed input (ATL / Android)", replay_html(r.extras["replay"], _e))
     if r.extras.get("timeline"):
         from .sources.timeline import timeline_lines
 
@@ -624,6 +632,11 @@ def build_pair_report(atl_dir: Path, android_dir: Path, density: float | None,
     steps = step_table(Capture(root), acap)
     if steps:
         r.extras["steps"] = steps
+    from .bedienung import replay_table
+
+    replay = replay_table(Capture(root), acap, density)
+    if replay:
+        r.extras["replay"] = replay
     r.environment["android_capture"] = str(android_dir)
     if density is None and trees:
         r.environment["density"] = "unknown (assumed 1.0; pass --density)"

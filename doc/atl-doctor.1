@@ -5,7 +5,7 @@ atl-doctor \- find out why an Android app does not run correctly under Android T
 .SH SYNOPSIS
 .B atl-doctor record
 [\fB\-o\fR \fIDIR\fR] [\fB\-\-android\fR] [\fB\-\-prefix\fR \fIDIR\fR | \fB\-\-launcher\fR \fICMD\fR]
-[\fB\-\-atl\-src\fR \fIDIR\fR] [\fB\-\-agent\fR \fIPATH\fR] [\fB\-\-headless\fR] [\fB\-\-steps\fR \fIFILE\fR] [\fB\-\-no\-trace\fR] [\fB\-\-light\fR] [\fB\-\-heap\fR]
+[\fB\-\-atl\-src\fR \fIDIR\fR] [\fB\-\-agent\fR \fIPATH\fR] [\fB\-\-headless\fR] [\fB\-\-steps\fR \fIFILE\fR] [\fB\-\-no\-trace\fR] [\fB\-\-light\fR] [\fB\-\-heap\fR] [\fB\-\-input\fR]
 \fIAPK\fR [\fB\-\-\fR \fIATL\-ARGS\fR]
 .br
 .B atl-doctor mark
@@ -36,6 +36,9 @@ atl-doctor \- find out why an Android app does not run correctly under Android T
 .br
 .B atl-doctor zustand
 \fBsichern\fR|\fBladen\fR [\fB\-\-android\fR] [\fB\-\-launcher\fR \fICMD\fR] \fIAPK\fR \fINAME\fR
+.br
+.B atl-doctor scenario-from
+[\fB\-o\fR \fIFILE\fR] \fIRECORDING\fR
 .PP
 .B atl-doctor
 [\fB\-\-version\fR] [\fB\-h\fR|\fB\-\-help\fR]
@@ -153,6 +156,11 @@ Count instances and bytes per class at every mark (agent; slow, forces a garbage
 .TP
 .B \-\-android
 Record the same app on an Android device over adb instead (own capture directory).
+.TP
+.B \-\-input
+With \fB\-\-android\fR: also record what is done on the device (touches and keys, \fBgetevent\fR; targets from
+\fBuiautomator dump\fR) into \fIinput.jsonl\fR. Costs some speed (a dump loop runs). Under ATL \fIinput.jsonl\fR is written from the
+agent whenever views were clicked, with or without this option.
 .TP
 .BR \-q ", " \-\-quiet
 Only errors on standard error.
@@ -331,6 +339,17 @@ Android screen density (default: from the Android capture).
 Do not download AOSP source (see \fBreport\fR).
 .RE
 .TP
+.B scenario-from
+Make a step file from a recorded input: \fIRECORDING\fR is a capture directory with \fIinput.jsonl\fR or that file itself.
+The step file replays every tap, long tap, text, key, scroll and back with \fBtap\fR and \fBlong\-tap\fR steps that carry the
+target view (see \fBSTEP FILES\fR and \fBINPUT RECORDINGS\fR); text that the recording does not hold is typed as placeholder
+characters. It goes to \fB\-o\fR \fIFILE\fR or to standard output.
+.RS
+.TP
+.BR \-o ", " \-\-output " \fIFILE\fR"
+Write the step file here.
+.RE
+.TP
 .B zustand
 \fBzustand sichern\fR \fIAPK NAME\fR saves the app's state, \fBzustand laden\fR \fIAPK NAME\fR puts it back.
 Under ATL that is a copy of the app's data directory ($ANDROID_APP_DATA_DIR, else
@@ -353,6 +372,7 @@ One command per line or separated by semicolons; \fB#\fR starts a comment outsid
 wait\-window "Title" [TIMEOUT]
 click "Text" | click id/NAME | click X,Y     (dp, relative to android:id/content)
 click X,Y android=X,Y (on Android the second point: a target laid out elsewhere there)
+tap|long\-tap [id/NAME] ["Text"] [path:0/2/1] [rect:L,T,R,B]
 key NAME[+NAME]       type "text"       scroll N       scroll\-smooth DY
 wait SECONDS          wait\-idle [TIMEOUT]
 mark ["name"]         screenshot "name"
@@ -366,6 +386,13 @@ GTK sees the notches as smooth scrolling. \fBscroll\-smooth\fR DY scrolls touchp
 (surface pixels under ATL, dp on Android) and is what \fBscroll\fR sent before. On Android every notch is one
 swipe of 64 dp (adb cannot send a wheel source).
 .PP
+.PP
+\fBtap\fR and \fBlong\-tap\fR (written by \fBscenario\-from\fR) look their view up in a fresh view tree by resource id, then by text
+or description (also the first text below a view without text), then by the child index path from android:id/content,
+and click its centre. If none is found the step does not stop the run: it clicks the centre of the rectangle (dp) if there
+is one, and the report says \fBnot found\fR for this step. Each tap, click, key, type and scroll step also writes a row to
+\fIreplay.jsonl\fR (target found or not, by which key, view tree taken after the step).
+.PP
 \fBtype\fR under ATL types through the US keyboard layout of the headless session: characters that layout has
 no key for (umlauts, for example) and characters outside the Basic Multilingual Plane (emoji) cannot be typed
 and fail the step.
@@ -375,6 +402,14 @@ state saved with \fBzustand sichern\fR, under ATL and on Android.
 .PP
 The same file runs under ATL and on Android, so the two recordings can be compared step by step.
 Error messages carry file name and line number.
+.SH INPUT RECORDINGS
+\fIinput.jsonl\fR in a capture directory: line 1 is a header (\fBformat\fR 1, \fBside\fR, \fBpackage\fR, \fBfull\fR, \fBsource\fR), every
+further line one event with \fBseq\fR, \fBt_us\fR (CLOCK_BOOTTIME of the marks), \fBkind\fR (tap, long\-tap, text, key, scroll, back),
+\fBactivity\fR, \fBtarget\fR (\fBid\fR full resource name, \fBcls\fR, \fBtext\fR, \fBdesc\fR, \fBpath\fR child indices below
+android:id/content, \fBrect\fR dp), \fBpoint\fR, and for text \fBtext\fR {\fBlen\fR}, for key \fBkey\fR, for scroll \fBscroll\fR {\fBdx\fR, \fBdy\fR}.
+Typed text is not stored, only its length; the text of an EditText is left out of the target. Only a recording with
+\fBfull\fR true holds the characters. Under ATL the file is written from the agent's click lines (\fBT\fR) and
+\fBActivity.onBackPressed\fR; on Android \fBrecord \-\-android \-\-input\fR writes it from \fBgetevent\fR and \fBuiautomator dump\fR.
 .SH ENVIRONMENT
 .TP
 .B ATL_DOCTOR_PREFIX
@@ -440,6 +475,13 @@ Screenshots, one per mark.
 .TQ
 .I steps.tsv
 The steps that ran, and the figures per step.
+.TP
+.I replay.jsonl
+Per input step of a step file: target found or not, by which key, and the view tree file taken after it.
+\fBreport\fR \fIDIR ANDROID\-DIR\fR compares the two sides in the section \fBReplayed input\fR.
+.TP
+.I input.jsonl
+The recorded input (see \fBINPUT RECORDINGS\fR).
 .TP
 .I memory.tsv
 Memory per phase.

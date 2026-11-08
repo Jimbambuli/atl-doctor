@@ -159,3 +159,23 @@ def test_node_key_without_id_ignores_numbers_in_the_text():
     a = Node("", "android.widget.TextView", "3 new messages", "", (0, 0, 1, 1), True)
     b = Node("", "android.widget.TextView", "12 new messages", "", (0, 0, 1, 1), True)
     assert _key(a) == _key(b) == "TextView[N new messages]"
+
+
+def test_request_names_the_image_only_when_asked(tmp_path):
+    seen = []
+
+    def answer():  # the hook: reads the request, answers the tree
+        req = tmp_path / VIEWDUMP_REQUEST
+        for _ in range(2):
+            while not req.exists():
+                time.sleep(0.02)
+            seen.append(req.read_text().split())
+            (tmp_path / f"{seen[-1][0]}.xml").write_text("<hierarchy/>")
+            req.unlink()
+
+    th = threading.Thread(target=answer)
+    th.start()
+    request_atl_tree(tmp_path, "a", timeout_s=5)
+    request_atl_tree(tmp_path, "b", timeout_s=5, shot=True)
+    th.join()
+    assert seen == [["a"], ["b", "shot"]]

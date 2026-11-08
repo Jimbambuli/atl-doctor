@@ -386,18 +386,19 @@ def find_node(nodes: list[Node], selector: str) -> Node | None:
     return next((n for n in found if on_screen(n)), found[0] if found else None)
 
 
-def request_atl_tree(trees_dir: Path, name: str, timeout_s: float = 10.0) -> Path | None:
-    """Ask the ATLViewDump hook for a dump into trees_dir/NAME.xml; None if none arrives in time."""
+def request_atl_tree(trees_dir: Path, name: str, timeout_s: float = 10.0, shot: bool = False) -> Path | None:
+    """Ask the ATLViewDump hook for a dump into trees_dir/NAME.xml; None if none arrives in time. Only with
+    SHOT does the hook also render the window image (trees_dir/shots/NAME.png); without it, none is made."""
     with _REQUEST_LOCK:  # one request file: a mark's tree and a step's lookup must not overwrite each other
-        return _request(Path(trees_dir), name, timeout_s)
+        return _request(Path(trees_dir), name, timeout_s, shot)
 
 
-def _request(trees_dir: Path, name: str, timeout_s: float) -> Path | None:
+def _request(trees_dir: Path, name: str, timeout_s: float, shot: bool = False) -> Path | None:
     out = trees_dir / f"{name}.xml"
     req = trees_dir / VIEWDUMP_REQUEST
     out.unlink(missing_ok=True)
     tmp = trees_dir / (VIEWDUMP_REQUEST + ".tmp")
-    tmp.write_text(name + "\n", encoding="utf-8")
+    tmp.write_text(name + "\n" + ("shot\n" if shot else ""), encoding="utf-8")
     os.replace(tmp, req)  # the hook must never read a half-written name
     end = time.monotonic() + timeout_s
     while time.monotonic() < end:

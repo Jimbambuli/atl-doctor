@@ -67,7 +67,7 @@ class RecordOptions:
     # --attach-agent, the runtime stays non-debuggable), ATL counts its stub calls itself (ATL_STUB_HITS) and the
     # time line comes from ART's sampling profiler instead of a full method trace. Needs an ATL with both.
     light: bool = False
-    shots: bool = True    # ATL: images of the app window at the marks; False writes none (ATL's shot hook is blocked)
+    shots: bool = True    # ATL: images of the app window at the marks; False requests none, so ATL renders none
     input: bool = False   # Android: record the touches and keys of the device into input.jsonl (getevent)
 
 
@@ -193,15 +193,17 @@ def tree_name(mark: Mark) -> str:
     return f"{mark.index:02d}-" + (re.sub(r"[^A-Za-z0-9._-]+", "-", mark.name).strip("-") or "mark")
 
 
-def _request_tree(cap: Capture, mark: Mark, session: HeadlessSession | None = None) -> threading.Thread:
+def _request_tree(cap: Capture, mark: Mark, session: HeadlessSession | None = None, shot: bool = True) -> threading.Thread:
     """In the background: the control loop must not wait for the app. The mark also gets an image of the app
-    window (shots/NN-name.png): from ATL itself, else, with a headless session, from spectacle."""
+    window (shots/NN-name.png) if SHOT: from ATL itself, else, with a headless session, from spectacle."""
     from .sources.shots import move_atl_window_shot, take_atl_shot
     from .sources.tree import request_atl_tree
 
     def run() -> None:
-        if request_atl_tree(cap.path(TREES), tree_name(mark)) is None:
+        if request_atl_tree(cap.path(TREES), tree_name(mark), shot=shot) is None:
             _warn(f"no view tree for mark {mark.index} ({mark.name}): ATLViewDump did not answer")
+        elif not shot:
+            return  # tree only: no image is requested, none is made
         elif move_atl_window_shot(cap.path(TREES), tree_name(mark), cap.path(SHOTS) / f"{tree_name(mark)}.png"):
             return  # the app window from ATL itself: no screen capture needed
         if session is not None:
@@ -364,8 +366,6 @@ def record_atl(opts: RecordOptions) -> int:
     trees = "ATL_VIEWDUMP" in extra_env
     if trees:
         cap.path(TREES).mkdir()
-        if not opts.shots:  # ATLViewDump makes trees/shots itself: a plain file there, so no image can be written
-            (cap.path(TREES) / SHOTS).write_bytes(b"")
     if not opts.headless:  # screenshots come from spectacle inside the headless session
         probes = [Probe("spectacle", False, "screenshots need --headless", p.hint) if p.name == "spectacle" else p
                   for p in probes]
@@ -494,14 +494,14 @@ def _record_loop(cap: Capture, proc: subprocess.Popen, stop: _Stop, ctl: int, tr
                     if memory:
                         _memory(cap, proc.pid, mk.index)
                     if trees:
-                        pending.append(_request_tree(cap, mk, session if shots else None))
+                        pending.append(_request_tree(cap, mk, session if shots else None, shots))
             except BlockingIOError:
                 pass
     for mk in drain_control(cap, ctl, buf):  # a mark sent by the last step
         if memory:
             _memory(cap, proc.pid, mk.index)
         if trees:
-            pending.append(_request_tree(cap, mk, session if shots else None))
+            pending.append(_request_tree(cap, mk, session if shots else None, shots))
     for t in pending:  # ATL must answer the tree (and pose for the screenshot) before it is ended
         if proc.poll() is None:
             t.join(TREE_WAIT_S)

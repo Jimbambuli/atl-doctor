@@ -38,11 +38,15 @@ def main() -> None:
         while True:
             if dump and os.path.exists(os.path.join(dump, "request")):
                 req = os.path.join(dump, "request")
-                name = open(req, encoding="utf-8").read().strip()
+                lines = open(req, encoding="utf-8").read().split()
+                name = lines[0]
                 if "--dump-delay" in opt:
                     time.sleep(float(args[args.index("--dump-delay") + 1]))
                 with open(os.path.join(dump, name + ".xml"), "w", encoding="utf-8") as f:
                     f.write('<?xml version="1.0"?>\n<hierarchy rotation="0" atl="1"></hierarchy>\n')
+                if "shot" in lines[1:]:
+                    os.makedirs(os.path.join(dump, "shots"), exist_ok=True)
+                    open(os.path.join(dump, "shots", name + ".png"), "wb").write(b"fake-window")
                 os.unlink(req)
             time.sleep(0.05)
     if "--signal" in opt:

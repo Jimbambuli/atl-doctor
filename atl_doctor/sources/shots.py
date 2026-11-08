@@ -124,10 +124,10 @@ def move_atl_window_shot(trees_dir: Path, name: str, png: Path) -> bool:
 
 
 def atl_window_shot(trees_dir: Path, name: str, png: Path) -> bool:
-    """Ask ATLViewDump for a tree and window image under NAME and move the image to PNG."""
+    """Ask ATLViewDump for a tree and (explicitly) a window image under NAME and move the image to PNG."""
     from .tree import request_atl_tree
 
-    return request_atl_tree(trees_dir, name) is not None and move_atl_window_shot(trees_dir, name, png)
+    return request_atl_tree(trees_dir, name, shot=True) is not None and move_atl_window_shot(trees_dir, name, png)
 
 
 def take_atl_shot(session, png: Path) -> bool:

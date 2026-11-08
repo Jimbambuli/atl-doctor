@@ -361,7 +361,7 @@ def test_mark_screenshot_with_surface_origin(tmp_path, monkeypatch):
             return True
 
     cap = Capture.create(tmp_path / "c", "atl")
-    monkeypatch.setattr("atl_doctor.sources.tree.request_atl_tree", lambda d, name: d / f"{name}.xml")
+    monkeypatch.setattr("atl_doctor.sources.tree.request_atl_tree", lambda d, name, **kw: d / f"{name}.xml")
     threads = []
     monkeypatch.setattr(ra.threading, "Thread", lambda target, daemon: threads.append(target) or type("T", (), {"start": lambda s: target()})())
     ra._request_tree(cap, Mark(1, 0, 0, "Main view"), Session())
@@ -755,7 +755,7 @@ def test_mark_uses_the_window_image_from_atl_without_a_session(tmp_path, monkeyp
 
     cap = Capture.create(tmp_path / "c", "atl")
 
-    def fake_tree(d, name):  # ATLViewDump writes the tree and, beside it, the window image
+    def fake_tree(d, name, shot=False):  # ATLViewDump writes the tree and, beside it, the window image
         (d / "shots").mkdir(parents=True, exist_ok=True)
         (d / "shots" / f"{name}.png").write_bytes(b"window")
         return d / f"{name}.xml"
@@ -781,7 +781,7 @@ def test_session_screenshot_only_when_atl_wrote_no_image(tmp_path, monkeypatch):
             return True
 
     cap = Capture.create(tmp_path / "c", "atl")
-    monkeypatch.setattr("atl_doctor.sources.tree.request_atl_tree", lambda d, name: d / f"{name}.xml")
+    monkeypatch.setattr("atl_doctor.sources.tree.request_atl_tree", lambda d, name, **kw: d / f"{name}.xml")
     monkeypatch.setattr(ra.threading, "Thread", lambda target, daemon: type("T", (), {"start": lambda s: target()})())
     ra._request_tree(cap, Mark(1, 0, 0, "Main view"), Session())
     assert (tmp_path / "c/shots/01-Main-view.png").read_bytes() == b"spectacle"
@@ -794,3 +794,25 @@ def test_no_shots_sets_no_image_target_but_keeps_the_tree(tmp_path, monkeypatch)
     opts = RecordOptions(apk=Path("/x/app.apk"), out=None, prefix=Path("/p"), atl_src=None, agent=None, shots=False)
     _, env = build_command(opts, cap, None, None)
     assert env["ATL_VIEWDUMP"] == f"{cap.root}/trees"
+
+
+def test_mark_requests_the_window_image_only_with_shots(tmp_path, monkeypatch):
+    from atl_doctor.capture import Mark
+    import atl_doctor.record_atl as ra
+    asked = []
+
+    def fake_tree(d, name, timeout_s=10.0, shot=False):
+        asked.append(shot)
+        if shot:
+            (d / "shots").mkdir(parents=True, exist_ok=True)
+            (d / "shots" / f"{name}.png").write_bytes(b"window")
+        return d / f"{name}.xml"
+
+    monkeypatch.setattr("atl_doctor.sources.tree.request_atl_tree", fake_tree)
+    monkeypatch.setattr(ra.threading, "Thread", lambda target, daemon: type("T", (), {"start": lambda s: target()})())
+    for shot in (False, True):
+        cap = Capture.create(tmp_path / f"c{shot}", "atl")
+        ra._request_tree(cap, Mark(1, 0, 0, "Main view"), None, shot)
+        assert (cap.root / "shots/01-Main-view.png").exists() is shot
+    assert asked == [False, True]
+    assert not (tmp_path / "cFalse/trees/shots").exists()

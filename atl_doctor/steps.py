@@ -615,7 +615,9 @@ class AtlDriver:
         if n.gtk_rect is None:
             return None
         cx, cy = (n.gtk_rect[0] + n.gtk_rect[2]) / 2, (n.gtk_rect[1] + n.gtk_rect[3]) / 2
-        if not n.window.startswith("activity"):  # dialog or popup: its own window, the topmost one
+        # a dialog is its own window, the topmost one; a PopupWindow ("popup") reports its views in the
+        # coordinates of the main window already
+        if not n.window.startswith(("activity", "popup")):
             ws = self.session.windows()
             main = self._main_window()
             top = ws[-1] if ws else None

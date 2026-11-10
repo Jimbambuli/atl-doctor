@@ -87,7 +87,7 @@ active network and its transports and capabilities, the active NetworkInfo, a fi
 and packages (present or not), the display size and density, and the number of accounts (never their names).
 It asks through the Application itself; the app's own calls are not recorded. It also sets breakpoints in
 registerReceiver and in every BroadcastReceiver.onReceive and writes the actions registered and delivered.
-The report \fBBroadcasts registered, never delivered\fR names each action a receiver waits for that never came
+The report \fBBroadcasts registered, never delivered\fR names each sticky action (one Android delivers on registration) a receiver waits for that never came
 (this works without an Android recording; against one it says whether Android delivered it), and with
 .B report DIR ANDROID\-DIR
 the section \fBSystem answers differ\fR lists the queries whose last answer differs between ATL and Android.

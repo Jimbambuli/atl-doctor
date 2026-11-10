@@ -39,8 +39,6 @@ System answers differ
 Broadcasts registered, never delivered
   72a6476c   40  Receiver registered for android.net.conn.CONNECTIVITY_CHANGE, android.net.conn.CONNECTIVITY_CHANGE never delivered  [1x, first: start]
       -> Android delivered it 1x in the same run; ATL registered the receiver but never sent the broadcast.
-  bb77e95f    0  Receiver registered for android.intent.action.SCREEN_OFF, android.intent.action.SCREEN_OFF never delivered  [2x, first: start]
-      -> The app waits for this broadcast. If ATL is supposed to send it, it does not; compare with an Android recording (record --android).
 
 Notes
   Broadcast actions could not be read for 1 register/deliver calls (ART refused the argument); they are not counted.

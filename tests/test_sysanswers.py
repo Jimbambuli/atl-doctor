@@ -33,8 +33,8 @@ def test_registered_never_delivered_without_android():
     assert len(reg[CONNECTIVITY]) == 1 and unreadable == 1 and deliv["android.intent.action.SCREEN_ON"] == 1
     notes: list[str] = []
     fs = broadcast_findings(ev, MARKS, "atl", notes)
-    assert [f.key for f in fs] == ["android.intent.action.SCREEN_OFF", CONNECTIVITY]   # SCREEN_OFF was in the same filter
-    f = fs[1]
+    assert [f.key for f in fs] == [CONNECTIVITY]   # SCREEN_OFF is not sticky: never delivered is normal
+    (f,) = fs
     assert f.title == f"Receiver registered for {CONNECTIVITY}, {CONNECTIVITY} never delivered"
     assert f.klass is Klass.SYSTEM and f.details["receivers"] == ["org.videolan.vlc.util.NetworkMonitor$1"]
     assert f.details["registrations"] == 1   # the overload that calls the other counts once
@@ -69,8 +69,7 @@ def test_annotate_android_delivered():
     annotate_broadcasts(fs, andr)
     by = {f.key: f for f in fs}
     assert by[CONNECTIVITY].details["android_delivered"] == 1 and "Android delivered it 1x" in by[CONNECTIVITY].suggestion
-    off = by["android.intent.action.SCREEN_OFF"]
-    assert off.details["android_registered"] is True and off.details["android_delivered"] == 0
+    assert "android.intent.action.SCREEN_OFF" not in by
 
 
 def _pair(tmp_path, atl_tsv="agent-sys-atl.tsv", android_tsv="agent-sys-android.tsv"):
@@ -148,7 +147,7 @@ def test_agent_records_answers_and_broadcasts_on_host_jvm(built, tmp_path):
     reg, deliv, unreadable = broadcasts(ev)
     assert set(reg) == {CONNECTIVITY, "com.example.PING", "android.intent.action.SCREEN_ON"} and unreadable == 0
     assert deliv == {"com.example.PING": 1}
-    assert [f.key for f in broadcast_findings(ev, MARKS, "atl")] == ["android.intent.action.SCREEN_ON", CONNECTIVITY]
+    assert [f.key for f in broadcast_findings(ev, MARKS, "atl")] == [CONNECTIVITY]
 
 
 @pytest.mark.skipif(not shutil.which("meson") or not shutil.which("javac"), reason="meson or JDK missing")
@@ -164,17 +163,19 @@ def test_nosys_switches_it_off(built, tmp_path):
     assert not [e for e in parse_agent(out) if e.tag in ("Q", "B")]
 
 
+BATTERY = "android.intent.action.BATTERY_CHANGED"
+
+
 def test_early_registration_counts_but_says_deliveries_before_are_not_seen():
-    ev = parse_agent_lines(["B\t1\t1\tearly\tA,B\tcom.x.R\t01", "B\t2\t1\tregister\tB\tcom.x.S\t02", "B\t3\t1\tdeliver\tB\tcom.x.S\t02"])
+    ev = parse_agent_lines([f"B\t1\t1\tearly\t{BATTERY},B\tcom.x.R\t01", "B\t2\t1\tregister\tB\tcom.x.S\t02", "B\t3\t1\tdeliver\tB\tcom.x.S\t02"])
     (f,) = broadcast_findings(ev, MARKS, "atl")
-    assert f.key == "A" and f.details["registered_before_agent"] is True and "before the agent was armed" in f.suggestion
-    live = parse_agent_lines(["B\t1\t1\tregister\tA\tcom.x.R\t01"])
+    assert f.key == BATTERY and f.details["registered_before_agent"] is True and "before the agent was armed" in f.suggestion
+    live = parse_agent_lines([f"B\t1\t1\tregister\t{BATTERY}\tcom.x.R\t01"])
     (g,) = broadcast_findings(live, MARKS, "atl")
     assert g.details["registered_before_agent"] is False and "armed" not in g.suggestion
 
 
-def test_app_own_action_is_not_blamed_on_atl():
-    ev = parse_agent_lines(["B\t1\t1\tregister\taction_pause_scan,android.intent.action.TIME_TICK\tcom.x.R\t01"])
-    fs = {f.key: f for f in broadcast_findings(ev, MARKS, "atl")}
-    assert fs["action_pause_scan"].klass is Klass.OTHER and fs["action_pause_scan"].details["system_action"] is False
-    assert fs["android.intent.action.TIME_TICK"].klass is Klass.SYSTEM
+def test_only_sticky_actions_are_reported():
+    ev = parse_agent_lines([f"B\t1\t1\tregister\tandroid.media.AUDIO_BECOMING_NOISY,com.fsck.k9.PING,{CONNECTIVITY}\tcom.x.R\t01"])
+    fs = broadcast_findings(ev, MARKS, "atl")
+    assert [f.key for f in fs] == [CONNECTIVITY] and fs[0].klass is Klass.SYSTEM and fs[0].details["system_action"] is True

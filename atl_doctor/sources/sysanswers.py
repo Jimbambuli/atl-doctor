@@ -2,7 +2,7 @@
 """System answers and broadcasts from the agent: Q lines (what the system answers the app, asked by the agent
 itself at every mark) and B lines (registerReceiver / onReceive of the app's receivers).
 
-Findings: a receiver registered for an action that was never delivered (also without an Android recording), and
+Findings: a receiver registered for a sticky action that was never delivered (also without an Android recording), and
 per query the answer of ATL against the answer of Android, where they differ.
 """
 from __future__ import annotations
@@ -16,6 +16,19 @@ from .exceptions import AgentEvent
 # answers that depend on the device or window by nature: shown, but not a cause to fix first
 DEVICE_QUERIES = ("display.metrics",)
 SYSTEM_PREFIXES = ("android.", "com.android.")
+# actions Android delivers at once on registration (sticky). Any other action is sent only on a real event, so a
+# receiver that never gets it is normal and not reported.
+STICKY_ACTIONS = frozenset({
+    "android.net.conn.CONNECTIVITY_CHANGE",   # ConnectivityManager.CONNECTIVITY_ACTION
+    "android.net.wifi.WIFI_STATE_CHANGED",
+    "android.net.wifi.STATE_CHANGE",
+    "android.media.action.HDMI_AUDIO_PLUG",
+    "android.intent.action.HEADSET_PLUG",
+    "android.intent.action.BATTERY_CHANGED",
+    "android.intent.action.ACTION_POWER_CONNECTED",
+    "android.intent.action.ACTION_POWER_DISCONNECTED",
+    "android.intent.action.DOCK_EVENT",
+})
 SUGGEST_BCAST = ("The app waits for this broadcast. If ATL is supposed to send it, it does not; compare with an "
                  "Android recording (record --android).")
 SUGGEST_EARLY = ("The receiver was registered before the agent was armed, so a delivery before that (a sticky broadcast "
@@ -64,7 +77,7 @@ def broadcasts(events: list[AgentEvent]) -> tuple[dict[str, set[tuple[str, str]]
 
 
 def broadcast_findings(events: list[AgentEvent], marks: list[Mark], side: str, notes: list[str] | None = None) -> list[Finding]:
-    """One finding per action a receiver was registered for and that was never delivered."""
+    """One finding per sticky action a receiver was registered for and that was never delivered."""
     registered, delivered, unreadable = broadcasts(events)
     live = {a for e in events if e.tag == "B" and e.fields[0] == "register" for a in e.fields[1].split(",")}
     if unreadable and notes is not None:
@@ -73,7 +86,7 @@ def broadcast_findings(events: list[AgentEvent], marks: list[Mark], side: str, n
     where = [Occurrence(last.name, last.index, side, 1, "agent")] if last else []
     out = []
     for action in sorted(registered):
-        if delivered[action]:
+        if delivered[action] or action not in STICKY_ACTIONS:
             continue
         receivers = sorted({c for c, _ in registered[action]})
         early = action not in live   # registered before the breakpoints were set: earlier deliveries are not seen

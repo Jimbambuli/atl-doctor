@@ -175,6 +175,15 @@ def test_early_registration_counts_but_says_deliveries_before_are_not_seen():
     assert g.details["registered_before_agent"] is False and "armed" not in g.suggestion
 
 
+def test_unreadable_deliveries_suppress_never_delivered():
+    # the agent saw deliveries but could not read their action: the sticky one may be among them
+    ev = parse_agent_lines([f"B\t1\t1\tregister\t{CONNECTIVITY}\tcom.x.R\t01",
+                            "B\t2\t1\tdeliver\t?\tcom.x.R\t01"])
+    notes = []
+    assert broadcast_findings(ev, MARKS, "atl", notes) == []
+    assert any("1 deliveries" in n for n in notes), notes
+
+
 def test_only_sticky_actions_are_reported():
     ev = parse_agent_lines([f"B\t1\t1\tregister\tandroid.media.AUDIO_BECOMING_NOISY,com.fsck.k9.PING,{CONNECTIVITY}\tcom.x.R\t01"])
     fs = broadcast_findings(ev, MARKS, "atl")

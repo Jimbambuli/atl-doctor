@@ -36,6 +36,8 @@ SUGGEST_EARLY = ("The receiver was registered before the agent was armed, so a d
 LIMIT_ASKED = ("System answers (Q lines) are asked by the agent itself through the Application, not recorded from the "
                "app's own calls; the connectivity answer is the one at each mark, the report compares the last one.")
 LIMIT_ARGS = "Broadcast actions could not be read for {n} register/deliver calls (ART refused the argument); they are not counted."
+LIMIT_BCAST = ("No broadcast is reported as never delivered: {n} deliveries had no readable action, so any of them may have "
+               "been the sticky one (an outdated JVMTI plugin is a common cause: tools/build-jvmti-plugin.sh).")
 
 
 def answers(events: list[AgentEvent]) -> dict[str, list[tuple[int, str]]]:
@@ -82,6 +84,11 @@ def broadcast_findings(events: list[AgentEvent], marks: list[Mark], side: str, n
     live = {a for e in events if e.tag == "B" and e.fields[0] == "register" for a in e.fields[1].split(",")}
     if unreadable and notes is not None:
         notes.append(LIMIT_ARGS.format(n=unreadable))
+    blind = sum(1 for e in events if e.tag == "B" and e.fields[0] == "deliver" and e.fields[1] == "?")
+    if blind:   # any of these deliveries may have been the sticky one: "never delivered" cannot be shown
+        if notes is not None:
+            notes.append(LIMIT_BCAST.format(n=blind))
+        return []
     last = marks[-1] if marks else None
     where = [Occurrence(last.name, last.index, side, 1, "agent")] if last else []
     out = []

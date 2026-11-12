@@ -14,6 +14,9 @@ reports have no view tree section.
 
 `atl-doctor` looks for the class `android.atl.ATLViewDump` in the ATL jars of the prefix
 (`api-impl.jar`). If it is there, `record` sets `ATL_VIEWDUMP=<capture>/trees` for ATL.
+Behind `--launcher` (e.g. a Flatpak with its own `/app`) the jars are out of sight: `record` always sets
+`ATL_VIEWDUMP` and finds out at run time whether ATL answers. The launcher must pass the variable on and
+let ATL write to the capture directory.
 
 ## Protocol
 

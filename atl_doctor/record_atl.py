@@ -96,7 +96,7 @@ def build_command(opts: RecordOptions, cap: Capture, plugin: Path | None, agent:
     env = {"LD_LIBRARY_PATH": f"{lib}:{lib}/art"} if lib else {}
     if opts.light:
         env["ATL_STUB_HITS"] = f"{c}/{STUB_HITS}"
-    if has_viewdump(opts.prefix):
+    if viewdump_expected(opts):
         env["ATL_VIEWDUMP"] = f"{c}/{TREES}"
     if wheel and " " in str(wheel):  # LD_PRELOAD splits at spaces too
         _warn(f"wheel-shim not used: LD_PRELOAD cannot hold a path with spaces ({wheel})")
@@ -105,6 +105,12 @@ def build_command(opts: RecordOptions, cap: Capture, plugin: Path | None, agent:
         env["LD_PRELOAD"] = ":".join([str(wheel), *filter(None, [os.environ.get("LD_PRELOAD")])])
         env["ATL_DOCTOR_WHEEL_LOG"] = f"{c}/{RUN_DIR}/wheel.log"
     return cmd, env
+
+
+def viewdump_expected(opts: RecordOptions) -> bool:
+    """Ask ATL for view trees? With a prefix if its jars have ATLViewDump. Behind a launcher the jars are out of
+    sight (a Flatpak has its own /app): ATL is asked at run time; an ATL without the hook just never answers."""
+    return bool(opts.launcher) or has_viewdump(opts.prefix)
 
 
 def _warn(msg: str) -> None:
@@ -230,7 +236,7 @@ def make_atl_driver(cap: Capture, session: HeadlessSession, opts: RecordOptions,
         proc = subprocess.Popen([str(helper), "serve", str(fifo), str(status)], env={**os.environ, **session.env()},
                                 stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     frames = jvmti_plugin(opts.prefix) is not None and find_helper(AGENT_LIB, opts.agent, opts.prefix) is not None
-    d = AtlDriver(cap, session, fifo, status, has_viewdump(opts.prefix), frames=frames, package=package)
+    d = AtlDriver(cap, session, fifo, status, viewdump_expected(opts), frames=frames, package=package)
     close = d.close
 
     def close_all() -> None:
@@ -328,6 +334,8 @@ def record_atl(opts: RecordOptions) -> int:
             probes[i] = p = Probe("agent", True) if agent else Probe("agent", False, f"{opts.agent} not found", p.hint)
         if p.name == "atl-src" and opts.stub_list and not opts.atl_src:
             probes[i] = p = Probe("stub-list", True)
+        if p.name == "viewdump" and opts.launcher:
+            probes[i] = p = Probe("viewdump", True, "not checked: behind --launcher ATL is asked at run time")
         if p.name in RECORD_PROBES and not p.available:
             _warn(f"{p.name} unavailable: {p.reason}")
     counter = find_helper(TRACECOUNT, None, opts.prefix) if opts.trace else None

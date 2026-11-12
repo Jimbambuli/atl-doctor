@@ -581,7 +581,8 @@ class AtlDriver:
         self._n_tree += 1
         path = request_atl_tree(self.cap.path(TREES), f"step-{self._n_tree:03d}")
         if path is None:
-            raise DoctorError("ATLViewDump did not answer")
+            raise DoctorError("ATLViewDump did not answer (an ATL without it, or ATL cannot write "
+                              f"{self.cap.path(TREES)}: a sandbox must share the capture directory)")
         self._tree_taken = True
         nodes = load_tree(path, "atl")
         content = next((n for n in nodes if n.full_id == "android:id/content" and n.window.startswith("activity")), None)

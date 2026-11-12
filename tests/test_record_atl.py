@@ -499,6 +499,20 @@ def test_build_command_with_launcher_and_no_prefix(tmp_path):
     cmd, env = build_command(opts, cap, None, None, trace=False)
     assert cmd == ["flatpak", "run", "--user", "org.example.Starter", "/x/app.apk", "--sdk-int", "34"]
     assert "LD_LIBRARY_PATH" not in env
+    # the jars behind a launcher are out of sight: ATL is asked for trees at run time
+    assert env["ATL_VIEWDUMP"] == f"{cap.root}/trees"
+
+
+def test_launcher_driver_takes_trees_and_probe_says_not_checked(apk, tmp_path, monkeypatch):
+    import atl_doctor.record_atl as ra
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("ATL_DOCTOR_PREFIX", raising=False)
+    opts = RecordOptions(apk=apk, out=None, prefix=None, atl_src=None, agent=None, launcher=_launcher())
+    assert ra.viewdump_expected(opts)
+    c = tmp_path / "c"
+    assert main(["record", "-o", str(c), "--launcher", _launcher(), str(apk), "--", "--exit-code", "0"]) == 0
+    probe = next(p for p in Capture.open(c).read_manifest().probes if p["name"] == "viewdump")
+    assert probe["available"] and "run time" in probe["reason"]
 
 
 def test_record_with_launcher_needs_no_prefix(apk, tmp_path, monkeypatch):

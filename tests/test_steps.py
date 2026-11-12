@@ -163,6 +163,25 @@ def test_atl_driver_click_without_tree_dump_uses_the_window_frame(tmp_path, monk
     assert sent == ["click 5 5"]
 
 
+def test_atl_driver_click_fails_when_the_tree_dump_does_not_answer(tmp_path, monkeypatch):
+    """Never fall back to the window frame silently: behind a launcher that would click 47 px too high."""
+    import pytest
+
+    import atl_doctor.sources.tree as tree
+    from atl_doctor.capture import Capture
+    from atl_doctor.errors import DoctorError
+    from atl_doctor.steps import AtlDriver
+
+    monkeypatch.setattr(tree, "request_atl_tree", lambda d, name, timeout_s=10.0: None)
+    d = AtlDriver(Capture.create(tmp_path / "c", "atl"), _Session(), tmp_path / "fifo", tmp_path / "status",
+                  has_tree=True, frames=False)
+    sent = []
+    monkeypatch.setattr(d, "_send", sent.append)
+    with pytest.raises(DoctorError, match="sandbox must share the capture directory"):
+        d.click(5, 5)
+    assert sent == []
+
+
 def test_example_step_files_parse():
     from pathlib import Path
 

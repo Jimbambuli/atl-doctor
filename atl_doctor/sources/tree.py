@@ -54,6 +54,10 @@ class Node:
     enabled: bool = True
     selected: bool = False
     full_id: str = field(default="", repr=False)
+    window_index: int = 0           # ATL: which <window> of the dump, in document order (later ones lie on top)
+    toplevel: int = -1              # ATL: the GTK toplevel whose surface gtk_rect is in (0: the activity's window,
+                                    # -1: not given by an older ATLViewDump)
+    surface_size: tuple[int, int] | None = None  # ATL: size of that toplevel's surface
 
 
 def _rect(s: str) -> Rect:
@@ -93,9 +97,13 @@ def load_tree(path: Path, side: str, density: float | None = None, normalize: bo
         content = next((e for e in root.iter("node") if e.get("resource-id") == "android:id/content"), None)
         package = content.get("package") if content is not None else None
 
+    win = {"index": -1, "toplevel": -1, "size": None}
+
     def walk(elem: ET.Element, parent: int | None, window: str, clip: Rect | None, alpha: float, opaque: bool) -> None:
         for k in elem:
             if k.tag == "window":
+                win.update(index=win["index"] + 1, toplevel=int(k.get("atl-toplevel", "-1")),
+                           size=surface_size(k))
                 walk(k, None, k.get("atl-what", ""), None, 1.0, False)
                 continue
             if k.tag != "node" or (package and k.get("package", package) != package):
@@ -105,7 +113,8 @@ def load_tree(path: Path, side: str, density: float | None = None, normalize: bo
             n = Node(short_id(full), a.get("class", ""), _norm(a.get("text", "")), _norm(a.get("content-desc", "")),
                      _rect(a.get("bounds", "[0,0][0,0]")), True, window=window, real_cls=a.get("atl-class", ""),
                      clickable=a.get("clickable") == "true", parent=parent, opaque=opaque, full_id=full,
-                     enabled=a.get("enabled") != "false", selected=a.get("selected") == "true")
+                     enabled=a.get("enabled") != "false", selected=a.get("selected") == "true",
+                     window_index=max(win["index"], 0), toplevel=win["toplevel"], surface_size=win["size"])
             n.real_cls = n.real_cls or n.cls
             new_clip, new_alpha = None, 1.0
             if atl:
@@ -151,6 +160,15 @@ def load_tree(path: Path, side: str, density: float | None = None, normalize: bo
     if normalize:
         _normalize(nodes, scale)
     return nodes
+
+
+def surface_size(window: ET.Element) -> tuple[int, int] | None:
+    """atl-surface-size="WxH" of an ATL <window>, None without it."""
+    try:
+        w, h = window.get("atl-surface-size", "").split("x")
+        return int(w), int(h)
+    except ValueError:
+        return None
 
 
 def _origin(nodes: list[Node]) -> tuple[float, float]:
@@ -370,12 +388,16 @@ def tree_findings(android: list[Node], atl: list[Node], phase: Mark, threshold_d
 
 
 def find_node(nodes: list[Node], selector: str) -> Node | None:
-    """First visible node matching `id/foo` or a text/description (case and whitespace insensitive)."""
+    """First visible node matching `id/foo` or a text/description (case and whitespace insensitive); of
+    several windows (ATL: a popup or dialog over the activity) the topmost one that has a match."""
     if selector.startswith("id/"):
         found = [n for n in nodes if n.visible and n.rid == selector]
     else:
         want = _norm(selector).casefold()
         found = [n for n in nodes if n.visible and want in (n.text.casefold(), n.desc.casefold())]
+    if found:
+        top = max(n.window_index for n in found)
+        found = [n for n in found if n.window_index == top]
     # a view outside the content (the neighbour page of a ViewPager) only when no other is on screen
     content = next((n for n in nodes if n.full_id == "android:id/content"), None)
     w, h = (content.rect[2] - content.rect[0], content.rect[3] - content.rect[1]) if content else (float("inf"), float("inf"))

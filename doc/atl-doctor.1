@@ -408,7 +408,7 @@ click "Text" | click id/NAME | click X,Y     (dp, relative to android:id/content
 click X,Y android=X,Y (on Android the second point: a target laid out elsewhere there)
 tap|long\-tap [id/NAME] ["Text"] [path:0/2/1] [rect:L,T,R,B]
 key NAME[+NAME]       type "text"       scroll N       scroll\-smooth DY
-wait SECONDS          wait\-idle [TIMEOUT]
+wait SECONDS          wait\-idle [TIMEOUT]       wait\-popup [TIMEOUT]
 mark ["name"]         screenshot "name"
 repeat N { ... }      (also over several lines, nested)
 .fi
@@ -426,6 +426,11 @@ or description (also the first text below a view without text), then by the chil
 and click its centre. If none is found the step does not stop the run: it clicks the centre of the rectangle (dp) if there
 is one, and the report says \fBnot found\fR for this step. Each tap, click, key, type and scroll step also writes a row to
 \fIreplay.jsonl\fR (target found or not, by which key, view tree taken after the step).
+.PP
+\fBwait\-popup\fR (default 10 s) waits under ATL until a fresh view tree has a window besides the activity's: a
+PopupWindow, a menu, a Compose popup, a Spinner's list or a dialog; the step fails if none comes. On Android it only
+waits until the app is idle. \fBclick\fR "Text" and \fBclick\fR id/NAME take the match in the topmost window of
+the tree, so they reach the items of an open popup or dialog.
 .PP
 \fBtype\fR under ATL types through the US keyboard layout of the headless session: characters that layout has
 no key for (umlauts, for example) and characters outside the Basic Multilingual Plane (emoji) cannot be typed
@@ -503,7 +508,9 @@ Method trace counters and the stub list.
 View trees, one per mark.
 .TP
 .I shots/
-Screenshots, one per mark.
+Screenshots, one per mark. Under ATL the window image shows the popups open on the window; a further
+window of the app (a dialog) is saved as \fINN\-name.N.png\fR and, when KWin's window is found by its size,
+also laid over the window image where KWin shows it.
 .TP
 .I steps.log
 .TQ

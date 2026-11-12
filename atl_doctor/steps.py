@@ -7,6 +7,7 @@ One command per line or separated by ';', '#' starts a comment outside quotes:
         up by id, then text, then path, then rectangle (dp); a tap whose view is not found does not stop the run, it
         goes to the rectangle's centre and replay.jsonl says "not found")
     type "text"   scroll N   scroll-smooth DY   wait SECONDS   wait-idle [TIMEOUT]   mark ["name"]   screenshot "name"
+    wait-popup [TIMEOUT]   (ATL: until the view tree has a window besides the activity's: a popup, menu, dialog)
     repeat N { ... }   (also over several lines, nested)
 A scenario may begin with `start_state: NAME`: the app's state saved with `atl-doctor state save` is loaded
 before the app starts.
@@ -32,6 +33,8 @@ if TYPE_CHECKING:
 
 WAIT_IDLE_S = 10.0
 WAIT_WINDOW_S = 60.0
+WAIT_POPUP_S = 10.0
+POPUP_POLL_S = 0.3
 TEXT_CHUNK = 400  # bytes of text per line to the input helper (it reads lines of up to 511 bytes)
 UIAUTOMATOR_LOCK = threading.Lock()  # two uiautomator dumps at once kill one of them (marks and steps both dump)
 
@@ -164,11 +167,11 @@ def _command(name: _Tok, args: list[_Tok], filename: str) -> Step:
         if not match or t is None:
             raise err("wait-window expects a title or package and an optional timeout")
         return Step(line, cmd, (match, t))
-    if cmd == "wait-idle":
+    if cmd in ("wait-idle", "wait-popup"):
         limit(1)
-        t = _number(args[0]) if args else WAIT_IDLE_S
+        t = _number(args[0]) if args else WAIT_IDLE_S if cmd == "wait-idle" else WAIT_POPUP_S
         if t is None:
-            raise err("wait-idle expects an optional timeout in seconds")
+            raise err(f"{cmd} expects an optional timeout in seconds")
         return Step(line, cmd, (t,))
     if cmd == "wait":
         limit(1)
@@ -278,6 +281,7 @@ class Driver(Protocol):
     def screenshot(self, name: str) -> None: ...
     def wait_idle(self, timeout_s: float) -> bool: ...
     def wait_window(self, match: str, timeout_s: float) -> bool: ...  # may set event_us: when the window appeared
+    def wait_popup(self, timeout_s: float) -> bool: ...
     def close_window(self) -> None: ...
     def mark(self, name: str) -> None: ...
 
@@ -468,6 +472,9 @@ def _run_one(s: Step, d: Driver, filename: str) -> dict | None:
     elif s.cmd == "wait-window":
         if not d.wait_window(str(a[0]), float(a[1])):
             raise fail(f"no window matching '{a[0]}' within {_fmt_s(float(a[1]))} s")
+    elif s.cmd == "wait-popup":
+        if not d.wait_popup(float(a[0])):
+            raise fail(f"no popup, menu or dialog within {_fmt_s(float(a[0]))} s")
     elif s.cmd == "close-window":
         d.close_window()
     elif s.cmd == "mark":
@@ -613,15 +620,18 @@ class AtlDriver:
 
     def node_pos(self, n) -> tuple[float, float] | None:
         """Centre of a node of the latest tree in dp (a dialog's own window is offset to the main window)."""
+        from .headless import toplevel_window
+
         if n.gtk_rect is None:
             return None
         cx, cy = (n.gtk_rect[0] + n.gtk_rect[2]) / 2, (n.gtk_rect[1] + n.gtk_rect[3]) / 2
-        # a dialog is its own window, the topmost one; a PopupWindow ("popup") reports its views in the
-        # coordinates of the main window already
-        if not n.window.startswith(("activity", "popup")):
+        # ATL names the toplevel whose surface the rectangle is in: 0 is the main window (with the popups
+        # shown on it), another one (a dialog) is found by its surface size. Without that (an older ATL): a
+        # dialog is its own window, the topmost one; a PopupWindow ("popup") is in main window coordinates.
+        if n.toplevel > 0 or (n.toplevel < 0 and not n.window.startswith(("activity", "popup"))):
             ws = self.session.windows()
             main = self._main_window()
-            top = ws[-1] if ws else None
+            top = (toplevel_window(ws, n.surface_size) if n.toplevel > 0 else None) or (ws[-1] if ws else None)
             if top and main and top is not main:
                 cx += top["surface"][0] - main["surface"][0]
                 cy += top["surface"][1] - main["surface"][1]
@@ -679,7 +689,7 @@ class AtlDriver:
         from .sources.shots import atl_window_shot, take_atl_shot
 
         png = self.cap.path(SHOTS) / f"{_safe(name)}.png"
-        if self.cap.path(TREES).is_dir() and atl_window_shot(self.cap.path(TREES), _safe(name), png):
+        if self.cap.path(TREES).is_dir() and atl_window_shot(self.cap.path(TREES), _safe(name), png, self.session):
             return  # the app window from ATL itself
         if not take_atl_shot(self.session, png):
             raise DoctorError("screenshot failed (spectacle)")
@@ -737,6 +747,19 @@ class AtlDriver:
                 return True
             time.sleep(WINDOW_POLL_S)
         return False
+
+    def wait_popup(self, timeout_s: float) -> bool:
+        """Wait until a fresh view tree has a window besides the activity's (popup, menu, dialog); the trees
+        stay in trees/ like the other lookups."""
+        if not self.has_tree:
+            raise DoctorError("wait-popup needs a view tree (ATLViewDump)")
+        end = time.monotonic() + timeout_s
+        while True:
+            if any(not n.window.startswith("activity") for n in self._tree()):
+                return True
+            if time.monotonic() >= end:
+                return False
+            time.sleep(POPUP_POLL_S)
 
     def mark(self, name: str) -> None:
         from .record_atl import send_mark
@@ -922,6 +945,11 @@ class AndroidDriver:
                 return True
             time.sleep(0.5)
         return False
+
+    def wait_popup(self, timeout_s: float) -> bool:
+        """uiautomator's dump does not tell a popup from the activity: Android waits until idle instead."""
+        self.wait_idle(timeout_s)
+        return True
 
     def mark(self, name: str) -> None:
         from .record_atl import send_mark

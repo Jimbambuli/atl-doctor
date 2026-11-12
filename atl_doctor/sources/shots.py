@@ -7,6 +7,7 @@ surface (KWin bufferGeometry, includes the client-side shadow); GTK coordinates 
 """
 from __future__ import annotations
 
+import glob
 import struct
 import sys
 import zlib
@@ -111,23 +112,88 @@ def read_origin(png: Path) -> tuple[float, float]:
         return 0.0, 0.0
 
 
-def move_atl_window_shot(trees_dir: Path, name: str, png: Path) -> bool:
+def move_atl_window_shot(trees_dir: Path, name: str, png: Path, session=None) -> bool:
     """ATL's own image of the app window: ATLViewDump writes trees_dir/shots/NAME.png together with the tree
-    (only the window, not the screen, no portal). Moves it to PNG; False if ATL did not write one."""
+    (only the window with the popups shown on it, not the screen, no portal). Moves it to PNG; False if ATL did
+    not write one. Further toplevels (dialogs) come as NAME.N.png and go to PNG's name .N.png; with a SESSION
+    they are also laid over PNG where KWin shows them."""
     src = Path(trees_dir) / SHOTS / f"{name}.png"
     if not src.is_file() or src.stat().st_size == 0:
         return False
     png = Path(png)
     png.parent.mkdir(parents=True, exist_ok=True)
     src.replace(png)
+    extra = {}
+    for p in (Path(trees_dir) / SHOTS).glob(f"{glob.escape(name)}.*.png"):
+        k = p.name[len(name) + 1:-4]
+        if k.isdigit():
+            extra[int(k)] = png.with_name(f"{png.stem}.{k}.png")
+            p.replace(extra[int(k)])
+    if extra and session is not None:
+        try:
+            compose_toplevels(png, extra, Path(trees_dir) / f"{name}.xml", session.windows())
+        except (DoctorError, OSError) as e:
+            print(f"atl-doctor: {png.name}: dialogs not laid over the window image: {e}", file=sys.stderr)
     return True
 
 
-def atl_window_shot(trees_dir: Path, name: str, png: Path) -> bool:
+def compose_toplevels(png: Path, extra: dict[int, Path], tree: Path, windows: list[dict]) -> list[int]:
+    """Lay the images of further toplevels (EXTRA: toplevel -> image) over the main window's image PNG at the
+    place KWin shows them; the tree tells each toplevel's surface size and where its image begins in the
+    surface. Returns the toplevels laid over; one whose KWin window is not found by its size stays apart."""
+    import xml.etree.ElementTree as ET
+
+    from ..headless import toplevel_window
+    from .tree import surface_size
+
+    try:
+        wins = ET.parse(tree).getroot().iter("window")
+    except (OSError, ET.ParseError) as e:
+        raise DoctorError(f"cannot read view tree {tree}: {e}") from e
+    surf: dict[int, tuple] = {}
+    for e in wins:
+        try:
+            ox, oy = (float(v) for v in e.get("atl-surface-offset", "").split(","))
+            surf.setdefault(int(e.get("atl-toplevel", "-1")), (surface_size(e), (ox, oy)))
+        except ValueError:
+            continue
+    main = next((w for w in windows if w["kind"] == "normal"), None)
+    if main is None or 0 not in surf:
+        return []
+    w, h, px = png_read(png)
+    out = bytearray(px)
+    done = []
+    for k, path in sorted(extra.items()):
+        win = toplevel_window(windows, surf[k][0]) if k in surf else None
+        if win is None:
+            print(f"atl-doctor: {png.name}: no KWin window for toplevel {k}, it stays apart ({path.name})",
+                  file=sys.stderr)
+            continue
+        dx = round(win["surface"][0] + surf[k][1][0] - main["surface"][0] - surf[0][1][0])
+        dy = round(win["surface"][1] + surf[k][1][1] - main["surface"][1] - surf[0][1][1])
+        ew, eh, epx = png_read(path)
+        for y in range(max(0, -dy), min(eh, h - dy)):
+            for x in range(max(0, -dx), min(ew, w - dx)):
+                i, j = ((y + dy) * w + x + dx) * 4, (y * ew + x) * 4
+                a = epx[j + 3]
+                if a == 255:
+                    out[i:i + 4] = epx[j:j + 4]
+                elif a:
+                    for c in range(3):
+                        out[i + c] = (epx[j + c] * a + out[i + c] * (255 - a)) // 255
+                    out[i + 3] = max(out[i + 3], a)
+        done.append(k)
+    if done:
+        png_write(png, w, h, bytes(out))
+    return done
+
+
+def atl_window_shot(trees_dir: Path, name: str, png: Path, session=None) -> bool:
     """Ask ATLViewDump for a tree and (explicitly) a window image under NAME and move the image to PNG."""
     from .tree import request_atl_tree
 
-    return request_atl_tree(trees_dir, name, shot=True) is not None and move_atl_window_shot(trees_dir, name, png)
+    return (request_atl_tree(trees_dir, name, shot=True) is not None
+            and move_atl_window_shot(trees_dir, name, png, session))
 
 
 def take_atl_shot(session, png: Path) -> bool:

@@ -47,8 +47,16 @@ The file has the form of `uiautomator dump`, so both sides are read by the same 
 </hierarchy>
 ```
 
-- `hierarchy atl="1"` marks an ATL dump; one `window` per activity, dialog or other window-manager
-  view (`atl-what`: `activity|dialog|wm <class>`).
+- `hierarchy atl="1"` marks an ATL dump; one `window` per activity, dialog, PopupWindow or other
+  window-manager view (`atl-what`: `activity|dialog|popup|wm <class>`), then one per popup that GTK shows
+  without Android views (`gtk <GTK type>`: a PopupMenu, a Spinner's list); its nodes are GTK widgets
+  (`class` and `atl-class` the GTK type, `text` a label's text).
+- `atl-toplevel` names the GTK toplevel whose surface the window's bounds are in: 0 is the activity's
+  window (a popup is shown on a toplevel and reported in its coordinates), a further one is a dialog.
+  `atl-surface-size` (`WxH`) and `atl-surface-offset` (`x,y`, where the toplevel's widget and its image
+  begin in the surface) let `atl-doctor` find the dialog's KWin window and place it.
+- With `shot`, the hook renders each toplevel with the popups open on it: `shots/<name>.png` for the
+  activity's window, `shots/<name>.<toplevel>.png` for the others.
 - `class` is the nearest framework class (what TalkBack/uiautomator report), `atl-class` the app's own
   class.
 - `bounds` is the GTK widget rectangle in window pixels; `atl-gtk-rect="false"` if the widget is not

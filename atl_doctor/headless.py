@@ -29,6 +29,14 @@ _WATCH_TAG = "ATLWATCH"
 _APP_WINDOW = "(w.normalWindow || w.dialog || w.popupWindow)"
 
 
+def toplevel_window(windows: list[dict], size: tuple[int, int] | None) -> dict | None:
+    """The KWin window of a further ATL toplevel (a dialog), known by the size of its surface: the one window
+    besides the main window with that size; None if there is none or more than one."""
+    main = next((w for w in windows if w["kind"] == "normal"), None)
+    hits = [w for w in windows if w is not main and size is not None and w.get("size") == tuple(size)]
+    return hits[0] if len(hits) == 1 else None
+
+
 def _own_address(socket: Path) -> str:
     """D-Bus address of a socket path; bytes outside the spec's optionally-escaped set become %XX."""
     ok = set(b"-_/.*" b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -206,20 +214,22 @@ class HeadlessSession:
         return self._events
 
     def windows(self) -> list[dict]:
-        """App windows bottom to top: caption, resource class, kind, frame geometry (x, y, w, h) and the origin
-        of the surface; GTK widget coordinates are relative to the surface, which includes the CSD shadow."""
+        """App windows bottom to top: caption, resource class, kind, frame geometry (x, y, w, h), the origin
+        of the surface and its size; GTK widget coordinates are relative to the surface, which includes the CSD
+        shadow."""
         js = (f"for (const w of workspace.stackingOrder) if {_APP_WINDOW} {{ const g = w.frameGeometry; "
               f"const b = w.bufferGeometry; "
               f"print('{_TAG}\\t' + [w.caption, w.resourceClass, w.dialog ? 'dialog' : w.popupWindow ? 'popup' : "
-              f"'normal', g.x, g.y, g.width, g.height, b.x, b.y].join('\\t')); }}")
+              f"'normal', g.x, g.y, g.width, g.height, b.x, b.y, b.width, b.height].join('\\t')); }}")
         out = []
         for line in self._script(js):
             f = line.split("\t")
-            if len(f) == 9:
+            if len(f) in (9, 11):
                 try:
                     out.append({"caption": f[0], "resource_class": f[1], "kind": f[2],
                                 "rect": tuple(float(v) for v in f[3:7]),
-                                "surface": (float(f[7]), float(f[8]))})  # client-side shadow included
+                                "surface": (float(f[7]), float(f[8])),  # client-side shadow included
+                                "size": (round(float(f[9])), round(float(f[10]))) if len(f) == 11 else None})
                 except ValueError:
                     continue
         return out

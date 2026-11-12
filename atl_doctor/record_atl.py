@@ -210,7 +210,8 @@ def _request_tree(cap: Capture, mark: Mark, session: HeadlessSession | None = No
             _warn(f"no view tree for mark {mark.index} ({mark.name}): ATLViewDump did not answer")
         elif not shot:
             return  # tree only: no image is requested, none is made
-        elif move_atl_window_shot(cap.path(TREES), tree_name(mark), cap.path(SHOTS) / f"{tree_name(mark)}.png"):
+        elif move_atl_window_shot(cap.path(TREES), tree_name(mark), cap.path(SHOTS) / f"{tree_name(mark)}.png",
+                                      session):
             return  # the app window from ATL itself: no screen capture needed
         if session is not None:
             try:

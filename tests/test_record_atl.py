@@ -423,6 +423,16 @@ def test_failed_counter_is_reported(tmp_prefix, apk, tmp_path, capsys):
     assert "tracecount: failed" in capsys.readouterr().out
 
 
+def test_headless_bus_socket_lies_in_the_runtime_directory(tmp_path):
+    """XDG_RUNTIME_DIR/bus is the bus socket (programs started with only XDG_RUNTIME_DIR look there), escaped."""
+    from atl_doctor import headless
+
+    assert headless._own_address(Path("/r/a b,c")) == "unix:path=/r/a%20b%2cc"
+    conf = headless._bus_config(Path("/usr/share/dbus-1/session.conf"), Path("/r/x&y/bus"))
+    assert "<include>/usr/share/dbus-1/session.conf</include>" in conf
+    assert "<listen>unix:path=/r/x%26y/bus</listen>" in conf
+
+
 def test_headless_session_passes_paths_as_arguments_not_shell_text(monkeypatch, request):
     """A capture path with shell characters must reach sh as an argument, never inside the script."""
     from atl_doctor import headless
@@ -451,7 +461,7 @@ def test_headless_session_passes_paths_as_arguments_not_shell_text(monkeypatch, 
         s.start()
     script = seen["args"][seen["args"].index("-c") + 1]
     assert str(s.run_dir) not in script and "$(" not in script.replace("$DBUS_SESSION_BUS_ADDRESS", "")
-    assert str(s.run_dir / "bus") in seen["args"]
+    assert str(s.run_dir / "bus.address") in seen["args"]
 
 
 def test_explicit_agent_that_does_not_exist_exit_3(tmp_prefix, apk, tmp_path, capsys):

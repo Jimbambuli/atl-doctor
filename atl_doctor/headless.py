@@ -22,9 +22,26 @@ START_TIMEOUT_S = 20.0
 SCRIPT_WAIT_S = 0.5
 SOCKET_PATH_MAX = 100
 _TAG = "ATLDOC"
+# the distribution's session bus configuration; the private bus takes it and listens in the runtime directory too
+SESSION_CONFS = (Path("/usr/share/dbus-1/session.conf"), Path("/etc/dbus-1/session.conf"))
 _WATCH_TAG = "ATLWATCH"
 # windows of the app: normal windows, dialogs and popups (KWin's own windows are none of these)
 _APP_WINDOW = "(w.normalWindow || w.dialog || w.popupWindow)"
+
+
+def _own_address(socket: Path) -> str:
+    """D-Bus address of a socket path; bytes outside the spec's optionally-escaped set become %XX."""
+    ok = set(b"-_/.*" b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    return "unix:path=" + "".join(chr(b) if b in ok else f"%{b:02x}" for b in os.fsencode(socket))
+
+
+def _bus_config(base: Path, socket: Path) -> str:
+    from xml.sax.saxutils import escape
+
+    return ('<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"\n'
+            ' "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">\n'
+            f"<busconfig>\n  <include>{escape(str(base))}</include>\n"
+            f"  <listen>{escape(_own_address(socket))}</listen>\n</busconfig>\n")
 
 
 class HeadlessSession:
@@ -60,7 +77,14 @@ class HeadlessSession:
         cfg.mkdir(parents=True, exist_ok=True)
         os.chmod(self.run_dir, 0o700)
         (cfg / "kxkbrc").write_text("[Layout]\nLayoutList=us\nUse=true\n")  # fixed layout; the input helper reads it
-        bus_file = self.run_dir / "bus"
+        # the bus socket lies at XDG_RUNTIME_DIR/bus, where programs look without DBUS_SESSION_BUS_ADDRESS
+        # (glycin's `env -i XDG_RUNTIME_DIR=... flatpak-spawn` in a Flatpak); the address file is named apart
+        bus_file = self.run_dir / "bus.address"
+        dbus = ["dbus-run-session"]
+        conf = next((c for c in SESSION_CONFS if c.is_file()), None)
+        if conf is not None:
+            (self.run_dir / "dbus.conf").write_text(_bus_config(conf, self.run_dir / "bus"), encoding="utf-8")
+            dbus.append(f"--config-file={self.run_dir / 'dbus.conf'}")
         env = {**os.environ, "XDG_RUNTIME_DIR": str(self.run_dir), "XDG_CONFIG_HOME": str(cfg),
                "KWIN_WAYLAND_NO_PERMISSION_CHECKS": "1", "KWIN_SCREENSHOT_NO_PERMISSION_CHECKS": "1",
                # script print() is debug output of category js, read back from kwin.log: some distributions
@@ -73,13 +97,14 @@ class HeadlessSession:
         script = ('echo "$DBUS_SESSION_BUS_ADDRESS" > "$1"; exec kwin_wayland --virtual --no-lockscreen '
                   f'--no-global-shortcuts --width {width} --height {height} --socket "$2"')
         with open(self.log, "wb") as log:
-            self.proc = subprocess.Popen(["dbus-run-session", "--", "sh", "-c", script, "sh", str(bus_file), self.socket],
+            self.proc = subprocess.Popen([*dbus, "--", "sh", "-c", script, "sh", str(bus_file), self.socket],
                                          env=env, stdout=log,
                                          stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
         end = time.monotonic() + START_TIMEOUT_S
         while time.monotonic() < end:
             if (self.run_dir / self.socket).exists() and bus_file.is_file() and bus_file.read_text().strip():
-                self.bus = bus_file.read_text().strip()
+                # only the socket in the runtime directory: it is what a sandbox sharing that directory reaches
+                self.bus = _own_address(self.run_dir / "bus") if conf is not None else bus_file.read_text().strip()
                 time.sleep(1.0)  # KWin finishes its own setup after creating the socket
                 self._start_watch()
                 return

@@ -130,6 +130,9 @@ path (Flatpak: \fB\-\-filesystem=\fR\fIDIR\fR). The environment atl\-doctor sets
 a launcher that drops \fBLD_PRELOAD\fR (as \fBflatpak run\fR does) must pass the wheel shim on itself
 (Flatpak: \fB\-\-env=LD_PRELOAD=\fR\fIPATH\fR, path visible in the sandbox), otherwise \fBscroll\fR \fIN\fR
 scrolls smoothly.
+With \fB\-\-headless\fR the session's runtime directory holds the Wayland socket and the D\-Bus socket \fIbus\fR;
+a sandbox that shares it and takes it as its \fBXDG_RUNTIME_DIR\fR reaches both (Flatpak: \fB\-\-filesystem=\fR$XDG_RUNTIME_DIR
+\fB\-\-env=XDG_RUNTIME_DIR=\fR$XDG_RUNTIME_DIR), including helpers that start with only that variable, such as glycin's image loaders.
 .TP
 .BI \-\-atl\-src " DIR"
 ATL source tree; used to build the list of stubs that are watched (default: $ATL_DOCTOR_ATL_SRC).

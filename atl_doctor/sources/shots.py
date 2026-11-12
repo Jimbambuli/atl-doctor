@@ -131,13 +131,22 @@ def atl_window_shot(trees_dir: Path, name: str, png: Path) -> bool:
 
 
 def take_atl_shot(session, png: Path) -> bool:
-    """Screenshot of the headless session plus the surface origin of the main window."""
+    """Stand-in when ATL gave no window image: screenshot of the whole headless session screen plus the surface
+    origin of the main window (the .origin file marks such an image). Said on stderr, the image looks different."""
+    from ..cli import log
+
     ws = session.windows()
     main = next((w for w in ws if w["kind"] == "normal"), ws[0] if ws else None)
     ok = session.screenshot(png)
-    if ok and main:
-        write_origin(png, main["surface"])
+    if ok:
+        write_origin(png, main["surface"] if main else (0.0, 0.0))
+        log(0, f"{png.name}: ATL gave no window image, a screenshot of the whole session screen stands in")
     return ok
+
+
+def screen_shots(shots_dir: Path) -> list[str]:
+    """Names of the images in SHOTS_DIR that are whole-screen stand-ins (take_atl_shot), not window images."""
+    return sorted(p.stem for p in Path(shots_dir).glob("*.png") if origin_file(p).is_file())
 
 
 def _crop(path: Path, rect_dp: list[float], scale: float, origin: tuple[float, float], out: Path,

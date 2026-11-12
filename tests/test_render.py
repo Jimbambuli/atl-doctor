@@ -264,3 +264,20 @@ def test_pair_report_drops_defects_that_android_shows_too(tmp_path):
     assert [f for f in r.findings if f.kind == "render"] == []
     r, _ = build_pair_report(atl.root, other.root, 1.0)
     assert [f.details["check"] for f in r.findings if f.kind == "render"] == ["contrast"]
+
+
+def test_report_names_whole_screen_stand_in_images(tmp_path):
+    """A stand-in screenshot (.origin beside it) is marked, so a black-bordered image is not taken for the window."""
+    btn = (20, 20, 220, 60)
+    pic = Pic()
+    pic.rect(btn, GREY)
+    pic.text(btn, WHITE)
+    cap = make(tmp_path, tree(node("Button", "x:id/b", btn, text="Download")), pic)
+    for o in (cap.root / "shots").glob("*.origin"):  # make() writes one; a window image from ATL has none
+        o.unlink()
+    r, _ = build_capture_report(cap.root)
+    assert "screen_shots" not in r.environment
+    for png in (cap.root / "shots").glob("*.png"):
+        png.with_suffix(".origin").write_text("0 0\n")
+    r, _ = build_capture_report(cap.root)
+    assert r.environment["screen_shots"].startswith("whole session screen, ATL gave no window image: ")

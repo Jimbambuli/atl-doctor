@@ -517,6 +517,11 @@ def build_capture_report(path: Path, jank_min_frames: int = JANK_MIN_FRAMES) -> 
             env[DETAIL_KEY] = details(wc)
         if any(cap.path(TREES).glob("*.xml")) and not any(cap.path(SHOTS).glob("*.png")):
             env["pixel_checks"] = "not checked (no screenshots in this capture)"
+        from .sources.shots import screen_shots
+
+        if screen_shots(cap.path(SHOTS)):
+            env["screen_shots"] = ("whole session screen, ATL gave no window image: "
+                                   + ", ".join(screen_shots(cap.path(SHOTS))))
     if m.environment.get("trace"):
         env["trace"] = m.environment["trace"]
     if m.environment.get("tracecount"):

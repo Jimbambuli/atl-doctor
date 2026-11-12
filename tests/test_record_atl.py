@@ -781,7 +781,7 @@ def test_mark_uses_the_window_image_from_atl_without_a_session(tmp_path, monkeyp
     assert not (tmp_path / "c/trees/shots/01-Main-view.png").exists()
 
 
-def test_session_screenshot_only_when_atl_wrote_no_image(tmp_path, monkeypatch):
+def test_session_screenshot_only_when_atl_wrote_no_image(tmp_path, monkeypatch, capsys):
     import atl_doctor.record_atl as ra
     from atl_doctor.capture import Mark
 
@@ -799,6 +799,10 @@ def test_session_screenshot_only_when_atl_wrote_no_image(tmp_path, monkeypatch):
     monkeypatch.setattr(ra.threading, "Thread", lambda target, daemon: type("T", (), {"start": lambda s: target()})())
     ra._request_tree(cap, Mark(1, 0, 0, "Main view"), Session())
     assert (tmp_path / "c/shots/01-Main-view.png").read_bytes() == b"spectacle"
+    # the stand-in is marked: .origin beside it, said on stderr, named in the report
+    from atl_doctor.sources.shots import screen_shots
+    assert screen_shots(tmp_path / "c/shots") == ["01-Main-view"]
+    assert "whole session screen stands in" in capsys.readouterr().err
 
 
 def test_no_shots_sets_no_image_target_but_keeps_the_tree(tmp_path, monkeypatch):

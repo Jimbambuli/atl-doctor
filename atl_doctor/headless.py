@@ -7,9 +7,12 @@ desktop is not touched. Windows are queried and moved with KWin scripts, screens
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import signal
+import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -50,6 +53,71 @@ def _bus_config(base: Path, socket: Path) -> str:
             ' "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">\n'
             f"<busconfig>\n  <include>{escape(str(base))}</include>\n"
             f"  <listen>{escape(_own_address(socket))}</listen>\n</busconfig>\n")
+
+
+MOUNTINFO = "/proc/self/mountinfo"
+
+
+def _mounts_below(path: Path) -> list[str]:
+    """Mount points at or below PATH, deepest first (field 5 of mountinfo, octal escapes undone)."""
+    root = os.path.realpath(path)
+    found = []
+    try:
+        with open(MOUNTINFO, encoding="utf-8", errors="surrogateescape") as f:
+            for line in f:
+                fields = line.split()
+                if len(fields) < 5:
+                    continue
+                mp = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), fields[4])
+                if mp == root or mp.startswith(root.rstrip("/") + "/"):
+                    found.append(mp)
+    except OSError:
+        pass
+    return sorted(found, key=len, reverse=True)
+
+
+def _remove_same_device(path: Path, dev: int) -> bool:
+    """Remove PATH, but nothing on another device than DEV (a mount the mount table does not show); True if
+    all of it is gone."""
+    st = os.lstat(path)
+    if st.st_dev != dev:
+        return False
+    if stat.S_ISDIR(st.st_mode):
+        gone = True
+        for entry in os.scandir(path):
+            gone &= _remove_same_device(Path(entry.path), dev)
+        if gone:
+            os.rmdir(path)
+        return gone
+    os.unlink(path)
+    return True
+
+
+def unmount_below(path: Path) -> list[str]:
+    """Unmount every file system mounted at or below PATH (FUSE first); returns the mount points that stay."""
+    for mp in _mounts_below(path):
+        for cmd in (["fusermount3", "-u", mp], ["fusermount", "-u", mp], ["umount", mp]):
+            try:
+                if subprocess.run(cmd, capture_output=True).returncode == 0:
+                    break
+            except OSError:
+                continue
+    return _mounts_below(path)
+
+
+def remove_tree(path: Path) -> None:
+    """Remove a session directory without ever touching a file system mounted below it: the Flatpak document
+    portal mounts the user's real documents at XDG_RUNTIME_DIR/doc, and shutil.rmtree() would delete them.
+    Every mount below is unmounted first; if one stays, nothing is removed. Then only what lies on the
+    directory's own device is removed."""
+    path = Path(path)
+    left = unmount_below(path)
+    if left:
+        raise DoctorError(f"not removing {path}: still mounted below it: {', '.join(left)}")
+    if path.is_symlink() or not path.exists():
+        return
+    if not _remove_same_device(path, os.lstat(path).st_dev):
+        raise DoctorError(f"not removing all of {path}: part of it is on another file system")
 
 
 class HeadlessSession:
@@ -93,7 +161,12 @@ class HeadlessSession:
         if conf is not None:
             (self.run_dir / "dbus.conf").write_text(_bus_config(conf, self.run_dir / "bus"), encoding="utf-8")
             dbus.append(f"--config-file={self.run_dir / 'dbus.conf'}")
+        # XDG_DATA_HOME: a document portal that the session bus starts (a Flatpak launcher asks for it) keeps
+        # its document store there and mounts it at XDG_RUNTIME_DIR/doc; with the user's own store the session
+        # directory would hold the user's real documents
+        (self.run_dir / "data").mkdir(exist_ok=True)
         env = {**os.environ, "XDG_RUNTIME_DIR": str(self.run_dir), "XDG_CONFIG_HOME": str(cfg),
+               "XDG_DATA_HOME": str(self.run_dir / "data"),
                "KWIN_WAYLAND_NO_PERMISSION_CHECKS": "1", "KWIN_SCREENSHOT_NO_PERMISSION_CHECKS": "1",
                # script print() is debug output of category js, read back from kwin.log: some distributions
                # switch debug off (qtlogging.ini) and Qt may log to journald instead of stderr
@@ -271,10 +344,18 @@ class HeadlessSession:
             except subprocess.TimeoutExpired:
                 continue
         self.proc = None
+        if self._link is None:  # the session directory stays in the capture: no portal mount may stay in it
+            left = unmount_below(self.run_dir)
+            if left:
+                print(f"atl-doctor: still mounted in the capture, do not delete it as is: {', '.join(left)}",
+                      file=sys.stderr)
         if self._link is not None:  # bring the logs back into the capture, drop the temporary directory
             self._link.unlink()
             self._link.mkdir()
             for f in self.run_dir.glob("*.log"):
                 shutil.copy(f, self._link / f.name)
-            shutil.rmtree(self.run_dir, ignore_errors=True)
+            try:
+                remove_tree(self.run_dir)
+            except (DoctorError, OSError) as e:
+                print(f"atl-doctor: {e}", file=sys.stderr)
             self.run_dir, self._link = self._link, None
